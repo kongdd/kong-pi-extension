@@ -1,0 +1,7 @@
+defaultProvider: opencode-go
+defaultModel: deepseek-v4-flash
+defaultThinkingLevel: high
+packages: 
+  - npm:pi-codebase-memory-mcp
+  - npm:@ryan_nookpi/pi-extension-headroom
+hideThinkingBlock: true

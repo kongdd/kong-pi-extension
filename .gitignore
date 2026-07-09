@@ -1,0 +1,14 @@
+cache
+bin
+# npm
+sessions
+*.png
+*agent*
+*.bak
+skills
+auth.json
+models.json
+*.db
+trust.json
+*log*
+settings.json
