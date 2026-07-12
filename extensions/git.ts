@@ -1,4 +1,4 @@
-/** Git helpers: /git-ai <description>, /git <command>. */
+/** Git helper: /git <description> or /git <command>. */
 import { getModel } from "@earendil-works/pi-ai";
 import {
   AuthStorage,
@@ -139,27 +139,15 @@ async function commit(pi: ExtensionAPI, cwd: string, push: boolean) {
   return push ? `已提交并推送：${item.message}` : `已提交：${item.message}`;
 }
 
-export default function (pi: ExtensionAPI) {
-  pi.registerCommand("git-ai", {
-    description: "AI 分析 Git 修改并生成提交信息",
-    handler: async (args, ctx) => {
-      try {
-        ctx.ui.notify("正在分析 Git 修改…", "info");
-        const result = await review(pi, ctx.cwd, args.trim() || "分析全部 Git 修改的代码");
-        pending.set(ctx.cwd, result);
-        const summary = await stats(pi, ctx.cwd, result.files);
-        ctx.ui.notify(
-          `${result.message}\n\n${result.reason}\n\n文件变更：\n${summary}\n\n确认：/git yes（提交）或 /git push（提交并推送）`,
-          "info",
-        );
-      } catch (error) {
-        ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
-      }
-    },
-  });
+const LOCAL_COMMANDS = new Set([
+  "add", "branch", "checkout", "cherry-pick", "clean", "clone", "commit", "config",
+  "diff", "fetch", "init", "log", "merge", "mv", "pull", "push", "rebase", "remote",
+  "reset", "restore", "revert", "rm", "show", "status", "stash", "switch", "tag",
+]);
 
+export default function (pi: ExtensionAPI) {
   pi.registerCommand("git", {
-    description: "执行 Git 命令",
+    description: "分析 Git 修改或执行 Git 命令",
     handler: async (args, ctx) => {
       try {
         const command = args.trim();
@@ -182,8 +170,22 @@ export default function (pi: ExtensionAPI) {
           ctx.ui.notify("已追加到上一次提交。", "info");
           return;
         }
-        const output = await git(pi, ctx.cwd, command ? command.split(/\s+/) : ["status", "--short"]);
-        ctx.ui.notify(output || "完成。", "info");
+
+        const [name, ...gitArgs] = command.split(/\s+/);
+        if (name && LOCAL_COMMANDS.has(name)) {
+          const output = await git(pi, ctx.cwd, [name, ...gitArgs]);
+          ctx.ui.notify(output || "完成。", "info");
+          return;
+        }
+
+        ctx.ui.notify("正在分析 Git 修改…", "info");
+        const result = await review(pi, ctx.cwd, command || "分析全部 Git 修改的代码");
+        pending.set(ctx.cwd, result);
+        const summary = await stats(pi, ctx.cwd, result.files);
+        ctx.ui.notify(
+          `${result.message}\n\n${result.reason}\n\n文件变更：\n${summary}\n\n确认：/git yes（提交）或 /git push（提交并推送）`,
+          "info",
+        );
       } catch (error) {
         ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
       }
