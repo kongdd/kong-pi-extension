@@ -2,6 +2,8 @@ cache
 bin
 # npm
 sessions
+session-backups
+
 *.png
 *agent*
 *.bak

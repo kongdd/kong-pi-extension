@@ -31,6 +31,7 @@
 
 ### 1.4 工具链
 
+- **`quota.ts`** — 注册 `/quota` 命令，调用系统 `ai-quota` 查询各 AI 服务额度。
 - **`rtk.ts`** — RTK（Rust Token Killer）代理层，自动将 bash 命令重写为 `rtk` 等价形式以节省 token。改写逻辑全部位于 Rust 注册表 `src/discover/registry.rs`，本扩展只是薄壳。
 - **`orca-agent-status.ts`** — Orca 管理器集成，监听 `before_agent_start` / `tool_call` / `message_end` 等 pi 事件并 POST 到 Orca hook 端点（`/hook/pi` 或 `/hook/omp`）上报 Agent 运行状态。
 

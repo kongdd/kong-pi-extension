@@ -22,6 +22,33 @@ alias R=/opt/miniforge3/envs/r4.5/bin/R
 alias julia=/home/kong/.local/bin/julia
 ```
 
+- `网络搜索`: web_fetch > exa_search
+
 ## 电脑环境
 
 - 约90G内存，32线程，可做并行和多线程计算
+
+## codebase-memory-mcp 使用经验
+
+使用codebase mcp进行大型repo的代码检索
+
+- `index_repository` 参数名为 `repo_path`，非 `path`
+- `full` 模式会扫描所有文件，遇到大型二进制文件（zip、tif 等）会导致 indexing worker 崩溃
+- 对含数据文件的仓库，优先用 `moderate` 模式：自动过滤 docs/examples/target/node_modules 等，且避开二进制文件
+
+## 图片
+
+生成的图片、截图的图片，默认放到images文件夹；给用户时，markdown语法写相对路径：
+```markdown
+![image_title](images/img.png)
+```
+
+## 后台进程（pi-processes）
+
+提交长运行命令（Julia 模型训练、build、dev server、`tail -f` 等）时，使用 `process` 工具而非 `bash`，避免阻塞主对话：
+
+- `process start "<command>" name="<描述名>"` — 启动后台进程，立即返回
+- `process list` / `process output id=<name>` — 查看状态与输出
+- `process kill id=<name>` — 终止
+
+启动后继续其他任务，完成/失败时自动通知；**不要轮询等待**。
