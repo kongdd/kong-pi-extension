@@ -10,8 +10,9 @@
  *   /friday test          测试当前语音通道
  *   /friday               查看状态
  *
- * 本地 TUI 模式通过 edge-tts 播放音频；VS Code Remote 模式在远端提供
- * SSE 音频流，由本地 vscode-voice 扩展播放（浏览器页面作为降级方案）。
+ * 本地 TUI 模式直接通过 mpv/ffplay 播放音频；VS Code Remote 模式优先通过
+ * `remote.autoForwardPorts` 将 MP3 POST 到本地 friday-receiver（零点击、零授权），
+ * 浏览器 SSE 页面作为降级方案。
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
@@ -213,6 +214,11 @@ export default function friday(pi: ExtensionAPI): void {
   // 仅当用户显式配置反向可达的接收器时才主动 POST。默认走远端 SSE，
   // 因为远端的 127.0.0.1 并不是本地 VS Code Extension Host。
   const localReceiverUrl = process.env.FRIDAY_RECEIVER_URL;
+  // VS Code Remote 模式下，远端 127.0.0.1:17322 会通过 VS Code 的
+  // `remote.autoForwardPorts` 设置自动转发到本地同名端口，本地 friday-receiver
+  // 只需监听该端口即可接收音频，零点击。
+  const DEFAULT_LOCAL_RECEIVER_URL = "http://127.0.0.1:17322/speak";
+  const disableLocalReceiver = process.env.FRIDAY_DISABLE_LOCAL_RECEIVER === "1";
 
   function renderStatus(ctx: { hasUI: boolean; ui: { setStatus(key: string, text: string | undefined): void } }): void {
     if (!ctx.hasUI) return;
@@ -334,12 +340,22 @@ export default function friday(pi: ExtensionAPI): void {
       }
       const audio = await readFile(output);
       const base64 = audio.toString("base64");
-      if (localReceiverUrl) {
-        const payload = JSON.stringify({ type: "mp3", data: base64, rate: speechRate });
-        const push = await pi.exec("sh", ["-lc", `curl -fsS --max-time 30 -X POST ${JSON.stringify(localReceiverUrl)} -H 'Content-Type: application/json' --data-binary @- <<'EOF'\n${payload}\nEOF`], { timeout: 35_000 });
+      const payload = JSON.stringify({ type: "mp3", data: base64, rate: speechRate });
+
+      // 优先 POST 到本地 receiver。VS Code Remote 模式下，远端 127.0.0.1:17322
+      // 通过 `remote.autoForwardPorts` 自动转发到本地同名端口；本地 friday-receiver
+      // 监听后即可播放，零点击。可通过 FRIDAY_RECEIVER_URL 自定义 URL，或
+      // FRIDAY_DISABLE_LOCAL_RECEIVER=1 强制走浏览器 SSE。
+      if (!disableLocalReceiver) {
+        const receiverUrl = localReceiverUrl ?? DEFAULT_LOCAL_RECEIVER_URL;
+        // 短超时：连接拒绝几乎瞬时；远端→本地隧道偶尔慢一点也足够
+        const push = await pi.exec("sh", ["-lc",
+          `curl -fsS --max-time 5 -X POST ${JSON.stringify(receiverUrl)} -H 'Content-Type: application/json' --data-binary @- <<'EOF'\n${payload}\nEOF`
+        ], { timeout: 8000 });
         if (push.code === 0) return;
       }
-      // vscode-voice 从本地连接转发后的 /events；浏览器也可消费同一协议。
+
+      // 降级：浏览器 SSE（需用户手动转发端口 + 点"启用语音"）
       // MP3 已在生成时应用语速，浏览器无需再设 playbackRate。
       emitRemoteSpeech({ action: "speak", audio: `data:audio/mpeg;base64,${base64}`, rate: speechRate });
     } finally {
@@ -455,7 +471,18 @@ export default function friday(pi: ExtensionAPI): void {
             const url = await startRemoteSpeechServer();
             enabled = true;
             renderStatus(ctx);
-            ctx.ui.notify(`Friday 已开启（VS Code Remote）。请在“端口”面板将远端 ${REMOTE_SPEECH_PORT} 转发到本地同名端口；vscode-voice 将自动连接。浏览器降级页面：${url}`, "info");
+            ctx.ui.notify(
+              [
+                `Friday 已开启（VS Code Remote）。`,
+                ``,
+                `推荐（零点击）：本地运行 friday-receiver 监听 17322，`,
+                `并在 settings.json 配置 "remote.autoForwardPorts": [17322]。`,
+                `打开后所有语音都自动推到本地播放。`,
+                ``,
+                `降级路径：浏览器打开 ${url}，点"启用语音"。`,
+              ].join("\n"),
+              "info",
+            );
           } catch (error) {
             ctx.ui.notify(`Friday 无法启动语音页面：${error instanceof Error ? error.message : String(error)}`, "error");
           }
@@ -531,10 +558,8 @@ export default function friday(pi: ExtensionAPI): void {
           rate: speechRate,
         };
         if (isVSCodeRemote) {
-          if (remoteClients.size === 0) {
-            ctx.ui.notify(`尚无本地播放器连接。请将远端端口 ${REMOTE_SPEECH_PORT} 转发到本地 ${REMOTE_SPEECH_PORT}，并确认 vscode-voice 已启用。`, "warning");
-            return;
-          }
+          // emitRemoteAudioSpeech 内部优先走本地 receiver（无需浏览器），
+          // 失败再降级到 SSE。
           await emitRemoteAudioSpeech(testCommand.text);
         } else if (ctx.mode === "rpc") {
           emitBrowserSpeech(ctx, testCommand);
@@ -552,8 +577,41 @@ export default function friday(pi: ExtensionAPI): void {
     },
   });
 
-  pi.on("session_start", (_event, ctx) => {
+  pi.on("session_start", async (_event, ctx) => {
     renderStatus(ctx);
+    if (!enabled) return;
+    // 默认开启：补齐 /friday on 在 VS Code Remote 下启动 SSE server 的副作用，
+    // 避免每次新会话都要手动 /friday on。
+    if (isVSCodeRemote && !remoteServer) {
+      if (!await hasEdgeTts()) {
+        ctx.ui.notify("Friday 默认开启失败：未找到 uvx edge-tts。", "error");
+        enabled = false;
+        renderStatus(ctx);
+        return;
+      }
+      try {
+        const url = await startRemoteSpeechServer();
+        ctx.ui.notify(
+          [
+            `Friday 已默认开启（VS Code Remote）。`,
+            ``,
+            `推荐（零点击）：本地运行 friday-receiver 监听 17322，`,
+            `并在 settings.json 配置 "remote.autoForwardPorts": [17322]。`,
+            `打开后所有语音都自动推到本地播放。`,
+            ``,
+            `降级路径：浏览器打开 ${url}，点"启用语音"。`,
+          ].join("\n"),
+          "info",
+        );
+      } catch (error) {
+        ctx.ui.notify(
+          `Friday 启动语音页面失败：${error instanceof Error ? error.message : String(error)}`,
+          "error",
+        );
+        enabled = false;
+        renderStatus(ctx);
+      }
+    }
   });
 
   pi.on("session_shutdown", (_event, ctx) => {

@@ -26,22 +26,17 @@ alias julia=/home/kong/.local/bin/julia
 
 ## 电脑环境
 
-- 约90G内存，32线程，可做并行和多线程计算
+- 90G内存，32线程，可并行、多线程
 
 ## codebase-memory-mcp 使用经验
 
 使用codebase mcp进行大型repo的代码检索
-
-- `index_repository` 参数名为 `repo_path`，非 `path`
-- `full` 模式会扫描所有文件，遇到大型二进制文件（zip、tif 等）会导致 indexing worker 崩溃
-- 对含数据文件的仓库，优先用 `moderate` 模式：自动过滤 docs/examples/target/node_modules 等，且避开二进制文件
+- `index_repository`参数名为 `repo_path`
+- 默认`moderate`模式，自动过滤docs/examples/target/node_modules 等，且避开二进制文件
 
 ## 图片
 
-生成的图片、截图的图片，默认放到images文件夹；给用户时，markdown语法写相对路径：
-```markdown
-![image_title](images/img.png)
-```
+生成、截图的图片，放images文件夹；markdown写相对路径：`![image_title](images/img.png)`
 
 ## 后台进程（pi-processes）
 

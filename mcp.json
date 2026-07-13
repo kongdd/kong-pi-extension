@@ -4,6 +4,10 @@
       "command": "/home/kong/.local/bin/codebase-memory-mcp",
       "args": [],
       "lifecycle": "lazy"
+    },
+    "context-mode": {
+      "command": "context-mode",
+      "lifecycle": "alive"
     }
   }
 }
