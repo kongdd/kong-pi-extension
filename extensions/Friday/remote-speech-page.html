@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Friday Speech</title>
+<style>
+  body { max-width: 34rem; margin: 12vh auto; padding: 0 1rem; font: 16px system-ui; }
+  button { padding: .65rem 1rem; font-size: 1rem; }
+  #status { margin-top: 1rem; color: #666; }
+</style>
+<h1>Friday 语音</h1>
+<p>本地浏览器播放远程 Pi 语音，请保持页面打开。</p>
+<button id="enable">启用语音</button>
+<div id="status">等待启用</div>
+<script>
+  const button = document.querySelector('#enable');
+  const status = document.querySelector('#status');
+  let enabled = false, pending = null, audio = null, lastCommandId = 0;
+
+  function applyRate(target, rate) {
+    if (typeof rate === 'number' && Number.isFinite(rate) && rate > 0) target.rate = rate;
+  }
+
+  function run(command) {
+    if (!enabled) { pending = command; return; }
+    if (typeof command.id === 'number' && command.id <= lastCommandId) return;
+    if (typeof command.id === 'number') lastCommandId = command.id;
+    speechSynthesis.cancel();
+    if (audio) { audio.pause(); audio = null; }
+    if (command.action !== 'speak') return;
+
+    if (command.audio) {
+      audio = new Audio(command.audio);
+      applyRate(audio, command.rate);
+      status.textContent = '正在播放 MP3';
+      audio.onended = () => { status.textContent = '已连接，等待播报'; };
+      audio.onerror = () => { status.textContent = 'MP3 播放失败'; };
+      audio.play().catch((e) => { status.textContent = '播放被阻止：' + e.message; });
+      return;
+    }
+    if (!command.text) return;
+    const u = new SpeechSynthesisUtterance(command.text);
+    u.lang = command.lang || 'zh-CN';
+    applyRate(u, command.rate);
+    status.textContent = '正在播放系统语音';
+    speechSynthesis.speak(u);
+    u.onend = () => { status.textContent = '已连接，等待播报'; };
+    u.onerror = (e) => { status.textContent = '系统语音失败：' + e.error; };
+  }
+
+  button.onclick = () => {
+    enabled = true;
+    button.disabled = true;
+    button.textContent = '语音已启用';
+    status.textContent = '已连接，等待播报';
+    if (pending) { const c = pending; pending = null; run(c); }
+  };
+
+  const events = new EventSource('/events');
+  events.onmessage = (e) => run(JSON.parse(e.data));
+  events.onerror = () => { status.textContent = '连接中断，正在重连'; };
+</script>
+</html>
