@@ -348,11 +348,22 @@ export default function friday(pi: ExtensionAPI): void {
       // FRIDAY_DISABLE_LOCAL_RECEIVER=1 强制走浏览器 SSE。
       if (!disableLocalReceiver) {
         const receiverUrl = localReceiverUrl ?? DEFAULT_LOCAL_RECEIVER_URL;
-        // 短超时：连接拒绝几乎瞬时；远端→本地隧道偶尔慢一点也足够
-        const push = await pi.exec("sh", ["-lc",
-          `curl -fsS --max-time 5 -X POST ${JSON.stringify(receiverUrl)} -H 'Content-Type: application/json' --data-binary @- <<'EOF'\n${payload}\nEOF`
-        ], { timeout: 8000 });
-        if (push.code === 0) return;
+        // 用 fetch 直传 JSON，避免把 base64 MP3 塞进 sh/curl 参数触发 execve E2BIG
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 8000);
+        try {
+          const res = await fetch(receiverUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: payload,
+            signal: controller.signal,
+          });
+          if (res.ok) return;
+        } catch {
+          // 连接拒绝或隧道未就绪时走浏览器 SSE 降级
+        } finally {
+          clearTimeout(timer);
+        }
       }
 
       // 降级：浏览器 SSE（需用户手动转发端口 + 点"启用语音"）
