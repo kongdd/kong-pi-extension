@@ -2,7 +2,7 @@
  * Codex Image Generation — pi extension
  *
  * 只做一件事：复用 `codex login` 的 ChatGPT OAuth token，
- * 注册 `codex_image_gen` 工具并调用 `/v1/images/generations`。
+ * 注册 `image_codex` 工具并调用 `/v1/images/generations`。
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -171,11 +171,11 @@ const Params = Type.Object({
 
 export default function codexImageGen(pi: ExtensionAPI) {
 	pi.registerTool({
-		name: "codex_image_gen",
+		name: "image_codex",
 		label: "Codex Image Generate",
 		description: "通过 Codex ChatGPT 认证调用 gpt-image-2 生图（无需 OPENAI_API_KEY），默认保存到当前工作目录。",
 		promptSnippet: "Generate an image from a text prompt via Codex auth (gpt-image-2)",
-		promptGuidelines: ["使用 codex_image_gen 时用英文提示词效果最佳。"],
+		promptGuidelines: ["使用 image_codex 时用英文提示词效果最佳。"],
 		parameters: Params,
 		async execute(_id, params, signal, onUpdate) {
 			const started = Date.now();

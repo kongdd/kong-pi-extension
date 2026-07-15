@@ -2,7 +2,7 @@
  * MiniMax Image Generation — pi extension
  *
  * 只做一件事：复用 pi `auth.json` 中 `minimax-cn` 的 api_key，
- * 注册 `minimax_image` 工具并调用 `POST /v1/image_generation`。
+ * 注册 `image_minimax` 工具并调用 `POST /v1/image_generation`。
  *
  * API: https://platform.minimaxi.com/docs/guides/image-generation
  */
@@ -115,12 +115,12 @@ const Params = Type.Object({
 
 export default function minimaxImageGen(pi: ExtensionAPI) {
 	pi.registerTool({
-		name: "minimax_image",
+		name: "image_minimax",
 		label: "MiniMax Image Generate",
 		description:
 			"通过 auth.json 中 minimax-cn 的 api_key 调用 minimax image-01 / image-01-live 生图（支持 t2i 与 i2i 参考图），默认 base64 落盘到当前工作目录。",
 		promptSnippet: "Generate an image from a text prompt via MiniMax image-01 / image-01-live (supports image-to-image via subject_reference)",
-		promptGuidelines: ["使用 minimax_image 时用英文提示词效果最佳。"],
+		promptGuidelines: ["使用 image_minimax 时用英文提示词效果最佳。"],
 		parameters: Params,
 		async execute(_id, params, signal, onUpdate) {
 			const started = Date.now();
