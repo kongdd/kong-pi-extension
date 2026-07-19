@@ -1,13 +1,13 @@
 /** Git helper: /git <description> or /git <command>. */
-import { getModel } from "@earendil-works/pi-ai";
+// Extension loader uses CommonJS resolution; use Pi's compatibility entry point.
+import { getModel as getBuiltinModel } from "@earendil-works/pi-ai/compat";
 import {
-  AuthStorage,
   createAgentSession,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-const MODEL = getModel("minimax-cn", "MiniMax-M3");
+const MODEL = getBuiltinModel("minimax-cn", "MiniMax-M3");
 const DIFF_LIMIT = 60_000;
 type Pending = { files: string[]; message: string; snapshot: string };
 const pending = new Map<string, Pending>();
@@ -88,7 +88,6 @@ async function review(pi: ExtensionAPI, cwd: string, request: string) {
   const { session } = await createAgentSession({
     cwd,
     model: MODEL,
-    authStorage: AuthStorage.create(),
     sessionManager: SessionManager.inMemory(),
     tools: [],
     thinkingLevel: "minimal",
