@@ -21,3 +21,10 @@ settings.json
 *.jsonl
 *.mp3
 .rtk
+
+*.jpg
+memory
+
+*bak*
+*.env
+models-store.json

@@ -7,7 +7,7 @@
     },
     "context-mode": {
       "command": "context-mode",
-      "lifecycle": "alive"
+      "lifecycle": "lazy"
     }
   }
 }

@@ -28,6 +28,11 @@ alias julia=/home/kong/.local/bin/julia
 
 - 90G内存，32线程，可并行、多线程
 
+## 跨仓库检索（/mnt/z/GitHub）
+
+- 禁止对/mnt/z，/mnt/z/GitHub执行全盘检索。
+- 先用 **autojump**：`zsh -lic 'j ModernHydro'`、`j ModelParams`、`j SpatialHydro` 等定位仓库根目录
+
 ## codebase-memory-mcp 使用经验
 
 使用codebase mcp进行大型repo的代码检索
@@ -35,7 +40,6 @@ alias julia=/home/kong/.local/bin/julia
 - 默认`moderate`模式，自动过滤docs/examples/target/node_modules 等，且避开二进制文件
 
 ## 图片
-
 生成、截图的图片，放images文件夹；markdown写相对路径：`![image_title](images/img.png)`
 
 ## 后台进程（pi-processes）
