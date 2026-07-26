@@ -1,8 +1,9 @@
 /**
- * Short extension — 提醒 LLM 用简短凝练的语言回答。
+ * Short extension — 默认注入系统提示；/short 时额外嵌入本轮 user message。
  *
- * 思路同 /caveman skill，改为注册为运行时上下文，每 turn 生效。
- * 切换：/short [on|off]   （默认 on）
+ * 用法：
+ *   /short on|off     开关系统提示注入（默认 on）
+ *   /short <问题>     发送带短答约束的 user message
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -20,14 +21,22 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("short", {
-    description: "短答模式（/short [on|off]）",
+    description: "短答：/short on|off | /short <问题>",
     handler: async (args, ctx) => {
-      const arg = args.trim().split(/\s+/)[0]?.toLowerCase();
-      if (arg === "off") enabled = false;
-      else if (arg === "on") enabled = true;
-      else if (arg) return;
-      else enabled = !enabled;
-      ctx.ui.notify(`短答：${enabled ? "开" : "关"}`, "info");
+      const text = args.trim();
+      const head = text.split(/\s+/)[0]?.toLowerCase();
+
+      if (head === "on" || head === "off") {
+        enabled = head === "on";
+        ctx.ui.notify(`短答系统提示：${enabled ? "开" : "关"}`, "info");
+        return;
+      }
+
+      if (!text) {
+        ctx.ui.notify("用法：/short on|off | /short <问题>", "warning");
+        return;
+      }
+      await pi.sendUserMessage(`${text}\n\n${REMINDER}`);
     },
   });
 }
