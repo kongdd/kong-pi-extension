@@ -1,0 +1,15 @@
+[Unit]
+Description=Qwen-Audio speech recognition service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.pi/agent/extensions/speech-recognition
+ExecStart=%h/.pi/agent/extensions/speech-recognition/run.sh
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

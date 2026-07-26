@@ -28,3 +28,5 @@ memory
 *bak*
 *.env
 models-store.json
+
+backup
