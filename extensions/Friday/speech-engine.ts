@@ -7,12 +7,18 @@ export type SpeechEngine = ReturnType<typeof createSpeechEngine>;
 
 export function createSpeechEngine(
   pi: ExtensionAPI,
-  opts: { isVSCodeRemote: boolean; localReceiverUrl?: string; disableLocalReceiver: boolean },
+  opts: {
+    isRemote: boolean;
+    enableRemoteSse: boolean;
+    localReceiverUrl?: string;
+    disableLocalReceiver: boolean;
+  },
 ) {
-  let enabled = false;
+  let enabled = opts.isRemote;
   let voiceMode: VoiceMode = "zh";
   let speechRate = 1.0;
   let speaking = false;
+  let warnedDisconnected = false;
 
   const remote = createRemoteChannel({
     pi,
@@ -41,15 +47,27 @@ export function createSpeechEngine(
 
   const makeSpeak = (text: string) => ({ action: "speak" as const, text, lang: langFor(voiceMode), rate: speechRate });
 
-  const deliverSpeech = async (text: string, ctx: StatusCtx & { mode?: string }) => {
-    if (opts.isVSCodeRemote) { await remote.speak(text); return; }
-    if (ctx.mode === "rpc") { rpc.emit(ctx, makeSpeak(text)); return; }
+  const deliverSpeech = async (text: string, ctx: StatusCtx & { mode?: string }): Promise<boolean> => {
+    if (opts.isRemote) {
+      const channel = await remote.speak(text);
+      if (channel === "none") {
+        if (!warnedDisconnected) {
+          ctx.ui.notify("Friday 无可用播放器：17322 接收器不可达，且 17321 浏览器未连接。", "warning");
+          warnedDisconnected = true;
+        }
+        return false;
+      }
+      warnedDisconnected = false;
+      return true;
+    }
+    if (ctx.mode === "rpc") { rpc.emit(ctx, makeSpeak(text)); return true; }
     local.enqueue(text, ctx);
+    return true;
   };
 
   const emitStop = (ctx: StatusCtx & { mode?: string }) => {
     if (ctx.mode === "rpc") rpc.emit(ctx, { action: "stop" });
-    if (opts.isVSCodeRemote) remote.sseEmit({ action: "stop" });
+    if (opts.isRemote) remote.sseEmit({ action: "stop" });
   };
 
   const ensureRemoteReady = async (ctx: StatusCtx) => {
@@ -65,12 +83,23 @@ export function createSpeechEngine(
   };
 
   const turnOn = async (ctx: StatusCtx & { mode?: string }) => {
-    if (opts.isVSCodeRemote) {
-      const url = await ensureRemoteReady(ctx);
-      if (!url) return;
+    warnedDisconnected = false;
+    if (opts.isRemote) {
+      if (opts.enableRemoteSse) {
+        const url = await ensureRemoteReady(ctx);
+        if (!url) return;
+        enabled = true;
+        renderStatus(ctx);
+        ctx.ui.notify(remoteOnHelp(url), "info");
+        return;
+      }
+      if (!await hasEdgeTts(pi)) {
+        ctx.ui.notify("Friday 无法开启：未找到 uvx edge-tts。", "error");
+        return;
+      }
       enabled = true;
       renderStatus(ctx);
-      ctx.ui.notify(remoteOnHelp(url), "info");
+      ctx.ui.notify("Friday 已开启：远程 17322 接收器。", "info");
       return;
     }
     if (ctx.mode !== "rpc") {

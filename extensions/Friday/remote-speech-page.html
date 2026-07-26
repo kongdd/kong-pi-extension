@@ -18,7 +18,9 @@
   let enabled = false, pending = null, audio = null, lastCommandId = 0;
 
   function applyRate(target, rate) {
-    if (typeof rate === 'number' && Number.isFinite(rate) && rate > 0) target.rate = rate;
+    if (typeof rate !== 'number' || !Number.isFinite(rate) || rate <= 0) return;
+    if (target instanceof HTMLMediaElement) target.playbackRate = rate;
+    else target.rate = rate;
   }
 
   function run(command) {

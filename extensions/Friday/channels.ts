@@ -132,20 +132,23 @@ export function createRemoteChannel(deps: {
     } catch { return false; } finally { clearTimeout(t); }
   };
 
-  const speak = async (text: string) => {
+  const speak = async (text: string): Promise<"receiver" | "sse" | "none"> => {
     const path = await synthMp3(deps.pi, text, deps.voice(), deps.rate(), "remote");
     if (!path) {
+      if (!active) return "none";
       sseEmit({ action: "speak", text, lang: langFor(deps.voice()), rate: deps.rate() });
-      return;
+      return "sse";
     }
     try {
       const base64 = await mp3Base64(path);
       const payload = JSON.stringify({ type: "mp3", data: base64, rate: deps.rate() });
       if (!deps.disableReceiver) {
         const url = deps.receiverUrl ?? DEFAULT_LOCAL_RECEIVER_URL;
-        if (await postReceiver(url, payload)) return;
+        if (await postReceiver(url, payload)) return "receiver";
       }
+      if (!active) return "none";
       sseEmit({ action: "speak", audio: `data:audio/mpeg;base64,${base64}`, rate: deps.rate() });
+      return "sse";
     } finally {
       await rm(path, { force: true }).catch(() => {});
     }

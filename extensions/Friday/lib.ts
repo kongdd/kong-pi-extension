@@ -37,20 +37,20 @@ export function rateToEdgeTts(rate: number): string {
   return `${p >= 0 ? "+" : ""}${p}%`;
 }
 
-export function isVSCodeRemoteEnv(): boolean {
+export function isRemoteEnv(): boolean {
   return Boolean(
     process.env.FRIDAY_REMOTE === "1"
-    || (process.env.VSCODE_IPC_HOOK_CLI
-      && (process.env.SSH_CONNECTION || process.env.WSL_DISTRO_NAME)),
+    || process.env.SSH_CONNECTION
+    || (process.env.VSCODE_IPC_HOOK_CLI && process.env.WSL_DISTRO_NAME),
   );
 }
 
 export function remoteOnHelp(sseUrl: string, isDefault = false): string {
   return [
-    `Friday 已${isDefault ? "默认" : ""}开启（VS Code Remote）。`,
+    `Friday 已${isDefault ? "默认" : ""}开启（远程模式）。`,
     "",
-    "推荐：本地 friday-receiver 监听 17322，settings.json 配置 remote.autoForwardPorts: [17322]。",
-    "降级：浏览器打开 " + sseUrl + "，点「启用语音」。",
+    "接收器：本地监听 17322，并通过 SSH RemoteForward 反向转发到远端。",
+    "浏览器：转发远端 17321，打开 " + sseUrl + " 并点「启用语音」。",
   ].join("\n");
 }
 

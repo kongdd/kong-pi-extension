@@ -4,14 +4,16 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { FRIDAY_CMDS, STATUS_KEY, VOICES, isVSCodeRemoteEnv, rateToEdgeTts, remoteOnHelp } from "./lib";
+import { FRIDAY_CMDS, STATUS_KEY, VOICES, isRemoteEnv, rateToEdgeTts, remoteOnHelp } from "./lib";
 import { createSpeechEngine } from "./speech-engine";
 import { extractAssistantText, summarizeForSpeech } from "./text";
 
 export default function friday(pi: ExtensionAPI): void {
-  const isVSCodeRemote = isVSCodeRemoteEnv();
+  const isRemote = isRemoteEnv();
+  const enableRemoteSse = process.env.FRIDAY_ENABLE_SSE === "1";
   const engine = createSpeechEngine(pi, {
-    isVSCodeRemote,
+    isRemote,
+    enableRemoteSse,
     localReceiverUrl: process.env.FRIDAY_RECEIVER_URL,
     disableLocalReceiver: process.env.FRIDAY_DISABLE_LOCAL_RECEIVER === "1",
   });
@@ -81,21 +83,24 @@ export default function friday(pi: ExtensionAPI): void {
       }
       if (cmd === "test") {
         if (!engine.enabled) {
-          ctx.ui.notify("请先 /friday on", "warning");
-          return;
+          await engine.turnOn(ctx);
+          if (!engine.enabled) return;
         }
         const text = engine.voiceMode === "zh"
           ? "你好，我是 Friday，语音连接正常。"
           : "Hello, this is Friday. Speech is working.";
-        await engine.deliverSpeech(text, ctx);
-        ctx.ui.notify("Friday 已发送测试语音。", "info");
+        const delivered = await engine.deliverSpeech(text, ctx);
+        ctx.ui.notify(
+          delivered ? "Friday 已发送测试语音。" : "Friday 测试失败：未连接播放器。",
+          delivered ? "info" : "error",
+        );
         return;
       }
 
-      const mode = isVSCodeRemote ? "VS Code Remote"
+      const mode = isRemote ? "SSH/远程"
         : ctx.mode === "rpc" ? "RPC 浏览器" : "本地 edge-tts";
       ctx.ui.notify(
-        `Friday\n  状态：${engine.enabled ? "开" : "关"}\n  音色：${VOICES[engine.voiceMode]}\n  语速：${engine.speechRate}×\n  模式：${mode}${isVSCodeRemote ? `\n  SSE 连接：${engine.remoteClientCount}` : ""}`,
+        `Friday\n  状态：${engine.enabled ? "开" : "关"}\n  音色：${VOICES[engine.voiceMode]}\n  语速：${engine.speechRate}×\n  模式：${mode}${enableRemoteSse ? `\n  SSE 连接：${engine.remoteClientCount}` : ""}`,
         "info",
       );
     },
@@ -103,7 +108,7 @@ export default function friday(pi: ExtensionAPI): void {
 
   pi.on("session_start", async (_event, ctx) => {
     engine.renderStatus(ctx);
-    if (!engine.enabled || !isVSCodeRemote || engine.hasRemoteServer) return;
+    if (!enableRemoteSse || !engine.enabled || !isRemote || engine.hasRemoteServer) return;
     const url = await engine.ensureRemoteReady(ctx);
     if (!url) {
       engine.enabled = false;
