@@ -27,8 +27,10 @@ export async function saveFridayConfig(config: FridayConfig): Promise<void> {
 const safeName = (text: string) => text.replace(/[^\p{L}\p{N}._-]+/gu, "_") || "unknown";
 const pad = (value: number, width = 2) => String(value).padStart(width, "0");
 
+export const projectName = (cwd: string) => basename(resolve(cwd)) || "root";
+
 export function savedAudioPath(cwd: string, sessionId: string, now = new Date()): string {
-  const project = safeName(basename(resolve(cwd)) || "root");
+  const project = safeName(projectName(cwd));
   const session = safeName(sessionId);
   const stamp = [
     now.getFullYear(), "-", pad(now.getMonth() + 1), "-", pad(now.getDate()),

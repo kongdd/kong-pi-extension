@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createLocalChannel, createRemoteChannel, createRpcChannel } from "./channels";
-import { savedAudioPath } from "./config";
+import { projectName, savedAudioPath } from "./config";
 import { STATUS_KEY, langFor, remoteOnHelp, type StatusCtx, type VoiceMode } from "./lib";
 import { hasEdgeTts, synthSavedMp3 } from "./tts";
 
@@ -51,11 +51,15 @@ export function createSpeechEngine(
   const makeSpeak = (text: string) => ({ action: "speak" as const, text, lang: langFor(voiceMode), rate: speechRate });
 
   const deliverSpeech = async (text: string, ctx: ExtensionContext): Promise<boolean> => {
+    const project = projectName(ctx.cwd);
+    const spokenText = voiceMode === "zh"
+      ? `Project ${project}。${text}`
+      : `Project ${project}. ${text}`;
     const saveTo = saveAudio
       ? savedAudioPath(ctx.cwd, ctx.sessionManager.getSessionId())
       : undefined;
     if (opts.isRemote) {
-      const channel = await remote.speak(text, ctx, saveTo);
+      const channel = await remote.speak(spokenText, ctx, saveTo);
       if (channel === "none") {
         if (!warnedDisconnected) {
           ctx.ui.notify("Friday 无可用播放器：17322 接收器不可达，且 17321 浏览器未连接。", "warning");
@@ -69,17 +73,17 @@ export function createSpeechEngine(
     if (ctx.mode === "rpc") {
       if (saveTo) {
         try {
-          if (!await synthSavedMp3(pi, text, voiceMode, speechRate, saveTo)) {
+          if (!await synthSavedMp3(pi, spokenText, voiceMode, speechRate, saveTo)) {
             ctx.ui.notify("Friday 音频保存失败：edge-tts 合成失败。", "warning");
           }
         } catch (error) {
           ctx.ui.notify(`Friday 音频保存失败：${error instanceof Error ? error.message : String(error)}`, "warning");
         }
       }
-      rpc.emit(ctx, makeSpeak(text));
+      rpc.emit(ctx, makeSpeak(spokenText));
       return true;
     }
-    local.enqueue(text, ctx, saveTo);
+    local.enqueue(spokenText, ctx, saveTo);
     return true;
   };
 

@@ -179,7 +179,12 @@ export default function (pi: ExtensionAPI) {
     if (!ctx.hasUI) return;
 
     link = connectVscode({
-      onContext: (data) => ctx.ui.setWidget(STATUS_KEY, lineWidget(statusLine(data)), { placement: "aboveEditor" }),
+      onContext: (data) => {
+        const status = statusLine(data);
+        const selected = data.selection?.selections.length;
+        const text = selected ? ctx.ui.theme.fg("accent", status) : status;
+        ctx.ui.setWidget(STATUS_KEY, lineWidget(text), { placement: "aboveEditor" });
+      },
       onInject: (text) => {
         // setEditorText replaces the buffer; append to preserve any draft.
         const existing = ctx.ui.getEditorText?.() ?? "";
