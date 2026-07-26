@@ -16,9 +16,17 @@ import {
   type StatusCtx,
   type VoiceMode,
 } from "./lib";
-import { findPlayer, mp3Base64, playMp3File, synthMp3 } from "./tts";
+import { archiveMp3, findPlayer, mp3Base64, playMp3File, synthMp3 } from "./tts";
 
 const SSE_PAGE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "remote-speech-page.html"), "utf8");
+
+async function saveAudioCopy(path: string, destination: string | undefined, ctx: StatusCtx): Promise<void> {
+  if (!destination) return;
+  try { await archiveMp3(path, destination); }
+  catch (error) {
+    ctx.ui.notify(`Friday 音频保存失败：${error instanceof Error ? error.message : String(error)}`, "warning");
+  }
+}
 
 // —— 本地 mpv 队列 ——
 export function createLocalChannel(deps: {
@@ -31,7 +39,7 @@ export function createLocalChannel(deps: {
 }) {
   let player: Player | undefined;
   let current: import("node:child_process").ChildProcess | undefined;
-  let queue: string[] = [];
+  let queue: Array<{ text: string; saveTo?: string }> = [];
   let draining = false;
   let cancelGen = 0;
 
@@ -43,8 +51,8 @@ export function createLocalChannel(deps: {
     deps.onSpeaking(false);
   };
 
-  const enqueue = (text: string, ctx: StatusCtx) => {
-    queue.push(text);
+  const enqueue = (text: string, ctx: StatusCtx, saveTo?: string) => {
+    queue.push({ text, saveTo });
     if (draining) return;
     draining = true;
     void (async () => {
@@ -54,8 +62,14 @@ export function createLocalChannel(deps: {
         if (!next || !player) continue;
         deps.onSpeaking(true);
         deps.renderStatus(ctx);
-        const path = await synthMp3(deps.pi, next, deps.voice(), deps.rate(), "local");
-        if (path && deps.isEnabled() && g === cancelGen) await playMp3File(player, path, (p) => { current = p; });
+        const path = await synthMp3(deps.pi, next.text, deps.voice(), deps.rate(), "local");
+        if (!path) continue;
+        await saveAudioCopy(path, next.saveTo, ctx);
+        if (deps.isEnabled() && g === cancelGen) {
+          await playMp3File(player, path, (p) => { current = p; });
+        } else {
+          await rm(path, { force: true }).catch(() => {});
+        }
         current = undefined;
       }
       deps.onSpeaking(false);
@@ -132,7 +146,11 @@ export function createRemoteChannel(deps: {
     } catch { return false; } finally { clearTimeout(t); }
   };
 
-  const speak = async (text: string): Promise<"receiver" | "sse" | "none"> => {
+  const speak = async (
+    text: string,
+    ctx: StatusCtx,
+    saveTo?: string,
+  ): Promise<"receiver" | "sse" | "none"> => {
     const path = await synthMp3(deps.pi, text, deps.voice(), deps.rate(), "remote");
     if (!path) {
       if (!active) return "none";
@@ -140,6 +158,7 @@ export function createRemoteChannel(deps: {
       return "sse";
     }
     try {
+      await saveAudioCopy(path, saveTo, ctx);
       const base64 = await mp3Base64(path);
       const payload = JSON.stringify({ type: "mp3", data: base64, rate: deps.rate() });
       if (!deps.disableReceiver) {

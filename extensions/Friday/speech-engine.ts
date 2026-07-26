@@ -1,7 +1,8 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createLocalChannel, createRemoteChannel, createRpcChannel } from "./channels";
+import { savedAudioPath } from "./config";
 import { STATUS_KEY, langFor, remoteOnHelp, type StatusCtx, type VoiceMode } from "./lib";
-import { hasEdgeTts } from "./tts";
+import { hasEdgeTts, synthSavedMp3 } from "./tts";
 
 export type SpeechEngine = ReturnType<typeof createSpeechEngine>;
 
@@ -10,6 +11,7 @@ export function createSpeechEngine(
   opts: {
     isRemote: boolean;
     enableRemoteSse: boolean;
+    saveAudio: boolean;
     localReceiverUrl?: string;
     disableLocalReceiver: boolean;
   },
@@ -17,6 +19,7 @@ export function createSpeechEngine(
   let enabled = opts.isRemote;
   let voiceMode: VoiceMode = "zh";
   let speechRate = 1.0;
+  let saveAudio = opts.saveAudio;
   let speaking = false;
   let warnedDisconnected = false;
 
@@ -47,9 +50,12 @@ export function createSpeechEngine(
 
   const makeSpeak = (text: string) => ({ action: "speak" as const, text, lang: langFor(voiceMode), rate: speechRate });
 
-  const deliverSpeech = async (text: string, ctx: StatusCtx & { mode?: string }): Promise<boolean> => {
+  const deliverSpeech = async (text: string, ctx: ExtensionContext): Promise<boolean> => {
+    const saveTo = saveAudio
+      ? savedAudioPath(ctx.cwd, ctx.sessionManager.getSessionId())
+      : undefined;
     if (opts.isRemote) {
-      const channel = await remote.speak(text);
+      const channel = await remote.speak(text, ctx, saveTo);
       if (channel === "none") {
         if (!warnedDisconnected) {
           ctx.ui.notify("Friday 无可用播放器：17322 接收器不可达，且 17321 浏览器未连接。", "warning");
@@ -60,8 +66,20 @@ export function createSpeechEngine(
       warnedDisconnected = false;
       return true;
     }
-    if (ctx.mode === "rpc") { rpc.emit(ctx, makeSpeak(text)); return true; }
-    local.enqueue(text, ctx);
+    if (ctx.mode === "rpc") {
+      if (saveTo) {
+        try {
+          if (!await synthSavedMp3(pi, text, voiceMode, speechRate, saveTo)) {
+            ctx.ui.notify("Friday 音频保存失败：edge-tts 合成失败。", "warning");
+          }
+        } catch (error) {
+          ctx.ui.notify(`Friday 音频保存失败：${error instanceof Error ? error.message : String(error)}`, "warning");
+        }
+      }
+      rpc.emit(ctx, makeSpeak(text));
+      return true;
+    }
+    local.enqueue(text, ctx, saveTo);
     return true;
   };
 
@@ -121,6 +139,8 @@ export function createSpeechEngine(
     set voiceMode(v: VoiceMode) { voiceMode = v; },
     get speechRate() { return speechRate; },
     set speechRate(v: number) { speechRate = v; },
+    get saveAudio() { return saveAudio; },
+    set saveAudio(v: boolean) { saveAudio = v; },
     get remoteClientCount() { return remote.clientCount; },
     get hasRemoteServer() { return remote.running; },
     renderStatus,

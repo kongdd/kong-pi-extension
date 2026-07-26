@@ -1,9 +1,11 @@
 /**
- * Friday — pi 语音助手（/friday on|off|zh|en|speed|test）
+ * Friday — pi 语音助手（/friday on|off|zh|en|speed|test|config）
  * 本地：edge-tts + mpv；Remote：POST 17322 或 SSE 17321 降级。
  */
 
+import { dirname } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { loadFridayConfig, savedAudioPath, saveFridayConfig } from "./config";
 import { FRIDAY_CMDS, STATUS_KEY, VOICES, isRemoteEnv, rateToEdgeTts, remoteOnHelp } from "./lib";
 import { createSpeechEngine } from "./speech-engine";
 import { extractAssistantText, summarizeForSpeech } from "./text";
@@ -11,9 +13,11 @@ import { extractAssistantText, summarizeForSpeech } from "./text";
 export default function friday(pi: ExtensionAPI): void {
   const isRemote = isRemoteEnv();
   const enableRemoteSse = process.env.FRIDAY_ENABLE_SSE === "1";
+  const config = loadFridayConfig();
   const engine = createSpeechEngine(pi, {
     isRemote,
     enableRemoteSse,
+    saveAudio: config.saveAudio,
     localReceiverUrl: process.env.FRIDAY_RECEIVER_URL,
     disableLocalReceiver: process.env.FRIDAY_DISABLE_LOCAL_RECEIVER === "1",
   });
@@ -34,14 +38,35 @@ export default function friday(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("friday", {
-    description: "Friday 语音：on|off|zh|en|speed <n>|test",
+    description: "Friday 语音：on|off|zh|en|speed <n>|test|config --save-audio=yes/no",
     getArgumentCompletions(prefix) {
       const v = prefix.trim().toLowerCase();
       return FRIDAY_CMDS.filter((c) => c.startsWith(v)).map((c) => ({ value: c, label: c }));
     },
     handler: async (args, ctx) => {
       const cmd = args.trim().toLowerCase();
+      const saveAudioArg = cmd.match(/^config\s+--save-audio=(yes|no)$/);
 
+      if (cmd === "config" || saveAudioArg) {
+        if (saveAudioArg) {
+          const previous = engine.saveAudio;
+          engine.saveAudio = saveAudioArg[1] === "yes";
+          try {
+            await saveFridayConfig({ saveAudio: engine.saveAudio });
+          } catch (error) {
+            engine.saveAudio = previous;
+            ctx.ui.notify(`Friday 配置保存失败：${error instanceof Error ? error.message : String(error)}`, "error");
+            return;
+          }
+        }
+        const folder = dirname(savedAudioPath(ctx.cwd, ctx.sessionManager.getSessionId()));
+        ctx.ui.notify(`Friday save-audio=${engine.saveAudio ? "yes" : "no"}\n${folder}`, "info");
+        return;
+      }
+      if (cmd.startsWith("config")) {
+        ctx.ui.notify("格式：/friday config --save-audio=yes/no", "error");
+        return;
+      }
       if (cmd === "on") {
         await engine.turnOn(ctx);
         return;
@@ -100,7 +125,7 @@ export default function friday(pi: ExtensionAPI): void {
       const mode = isRemote ? "SSH/远程"
         : ctx.mode === "rpc" ? "RPC 浏览器" : "本地 edge-tts";
       ctx.ui.notify(
-        `Friday\n  状态：${engine.enabled ? "开" : "关"}\n  音色：${VOICES[engine.voiceMode]}\n  语速：${engine.speechRate}×\n  模式：${mode}${enableRemoteSse ? `\n  SSE 连接：${engine.remoteClientCount}` : ""}`,
+        `Friday\n  状态：${engine.enabled ? "开" : "关"}\n  音色：${VOICES[engine.voiceMode]}\n  语速：${engine.speechRate}×\n  保存音频：${engine.saveAudio ? "是" : "否"}\n  模式：${mode}${enableRemoteSse ? `\n  SSE 连接：${engine.remoteClientCount}` : ""}`,
         "info",
       );
     },

@@ -1,6 +1,6 @@
-import { readFile, rm } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { PLAYERS, VOICES, playerArgs, rateToEdgeTts, spawnQuiet, waitForExit } from "./lib";
 import type { Player, VoiceMode } from "./lib";
@@ -26,6 +26,28 @@ export async function synthMp3(pi: ExtensionAPI, text: string, voice: VoiceMode,
     return undefined;
   }
   return output;
+}
+
+export async function archiveMp3(path: string, destination: string): Promise<void> {
+  await mkdir(dirname(destination), { recursive: true });
+  await copyFile(path, destination);
+}
+
+export async function synthSavedMp3(
+  pi: ExtensionAPI,
+  text: string,
+  voice: VoiceMode,
+  rate: number,
+  destination: string,
+): Promise<boolean> {
+  const path = await synthMp3(pi, text, voice, rate, "saved");
+  if (!path) return false;
+  try {
+    await archiveMp3(path, destination);
+    return true;
+  } finally {
+    await rm(path, { force: true }).catch(() => {});
+  }
 }
 
 export async function playMp3File(player: Player, path: string, onSpawn?: (p: import("node:child_process").ChildProcess) => void): Promise<void> {
