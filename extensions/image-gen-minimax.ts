@@ -8,7 +8,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { readStoredCredential } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -45,7 +45,7 @@ class HttpError extends Error {
 }
 
 const loadApiKey = (): string => {
-	const credential = AuthStorage.create().get(PROVIDER);
+	const credential = readStoredCredential(PROVIDER);
 	if (credential?.type !== "api_key" || !credential.key) {
 		throw new Error(`MiniMax 认证不可用：请在 auth.json 的 "${PROVIDER}" 中配置 api_key`);
 	}
