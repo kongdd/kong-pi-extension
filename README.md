@@ -18,7 +18,7 @@
 
 ### 1.1 图像生成
 
-- **`codex-image-gen.ts`** — 注册 `codex_image_gen` 工具与 `/image-codex` 命令。复用 `codex login` 的 ChatGPT OAuth token 调用 `gpt-image-2`，无需 `OPENAI_API_KEY`。
+- **`image-gen-codex.ts`** — 注册 `image_codex` 工具与 `/image-codex` 命令。复用 pi `auth.json` 中 `openai-codex` 的 ChatGPT OAuth token 调用 `gpt-image-2`。
 - **`minimax-image-gen.ts`** — 注册 `minimax_image` 工具。复用 `auth.json` 中 `minimax-cn` 的 API key 调用 MiniMax `image-01` / `image-01-live`，支持文生图与图生图（`subject_reference`）。
 
 ### 1.2 联网

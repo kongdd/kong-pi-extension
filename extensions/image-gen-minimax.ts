@@ -96,7 +96,7 @@ const parseCmdArgs = (raw: string, keys: string[]) => {
 };
 
 const Params = Type.Object({
-	prompt: Type.String({ description: "图像生成提示词（英文最佳；最长 1500 字符）" }),
+	prompt: Type.String({ description: "图像生成提示词（最长 1500 字符）" }),
 	model: Type.Optional(StringEnum(MODELS, { description: "模型，默认 image-01" })),
 	aspect_ratio: Type.Optional(StringEnum(ASPECT_RATIOS, { description: "宽高比，默认 1:1" })),
 	n: Type.Optional(Type.Integer({ minimum: 1, maximum: 9, description: "生成数量 1-9，默认 1" })),

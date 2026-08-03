@@ -1,19 +1,21 @@
 /**
  * Codex Image Generation — pi extension
  *
- * 只做一件事：复用 `codex login` 的 ChatGPT OAuth token，
- * 注册 `image_codex` 工具并调用 `/v1/images/generations`。
+ * 只做一件事：复用 pi `auth.json` 中 `openai-codex` 的 OAuth token，
+ * 注册 `image_codex` 工具并调用 Codex 图像生成端点。
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
-import { arch, homedir, platform, release } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, resolve } from "node:path";
+import { arch, platform, release } from "node:os";
 
-const CODEX_HOME = process.env.COHOME ?? join(homedir(), ".codex");
+const PROVIDER = "openai-codex";
+const DEFAULT_BASE_URL = "https://chatgpt.com/backend-api";
 const ORIGINATOR = "codex_cli_rs";
+const CODEX_VERSION = "0.146.0";
 const MODEL = "gpt-image-2";
 const QUALITY = ["low", "medium", "high", "auto"] as const;
 const SIZE = ["1024x1024", "1536x1024", "1024x1536", "auto"] as const;
@@ -31,7 +33,6 @@ type Auth = {
 
 type Runtime = {
   baseUrl: string;
-  version: string;
   auth: Auth;
 };
 
@@ -41,7 +42,6 @@ type ImageResponse = {
   quality?: string;
 };
 
-const textIfExists = (path: string) => (existsSync(path) ? readFileSync(path, "utf-8") : undefined);
 const abs = (path: string) => (isAbsolute(path) ? path : resolve(process.cwd(), path));
 const str = (value: unknown) => (typeof value === "string" ? value : undefined);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -62,55 +62,38 @@ const jwtPayload = (token: string): Record<string, unknown> => {
   }
 };
 
-const loadAuth = (): Auth => {
-  const raw = textIfExists(join(CODEX_HOME, "auth.json"));
-  if (!raw) throw new Error("Codex 认证不可用：请先运行 `codex login` 登录 ChatGPT");
-
-  const authJson = JSON.parse(raw) as {
-    auth_mode?: string;
-    tokens?: { access_token?: string; account_id?: string };
-  };
-  const token = authJson.tokens?.access_token;
-  if (authJson.auth_mode !== "chatgpt" || !token) {
-    throw new Error("Codex 认证不可用：请先运行 `codex login` 登录 ChatGPT");
+const loadRuntime = async (ctx: ExtensionContext): Promise<Runtime> => {
+  const result = await ctx.modelRegistry.getProviderAuth(PROVIDER);
+  const token = result?.auth.apiKey;
+  if (!token) {
+    throw new Error(`Codex 认证不可用：请通过 pi /login 配置 "${PROVIDER}"`);
   }
 
   const claims = jwtPayload(token);
-  const expMs = typeof claims.exp === "number" ? claims.exp * 1000 : undefined;
-  if (expMs && expMs <= Date.now()) throw new Error("Codex 认证已过期：请重新运行 `codex login`");
-
   const account = (claims["https://api.openai.com/auth"] as Record<string, unknown>) ?? {};
   const profile = (claims["https://api.openai.com/profile"] as Record<string, unknown>) ?? {};
+  const provider = ctx.modelRegistry.getProvider(PROVIDER);
 
   return {
-    token,
-    accountId: authJson.tokens?.account_id ?? str(account.chatgpt_account_id),
-    email: str(profile.email),
-    plan: str(account.chatgpt_plan_type),
+    baseUrl: (result.auth.baseUrl ?? provider?.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, ""),
+    auth: {
+      token,
+      accountId: str(account.chatgpt_account_id),
+      email: str(profile.email),
+      plan: str(account.chatgpt_plan_type),
+    },
   };
 };
 
-const codexVersion = (): string => {
-  const t = textIfExists(join(CODEX_HOME, "version.json"));
-  return t ? str(JSON.parse(t).latest_version) ?? "0.0.0" : "0.0.0";
-};
-
-const userAgent = (v: string) =>
-  `${ORIGINATOR}/${v} (${platform()} ${release()}; ${arch()}) terminal/${process.env.TERM ?? "unknown"}`;
-
-const loadRuntime = (): Runtime => {
-  const config = textIfExists(join(CODEX_HOME, "config.toml"));
-  const baseUrl = config?.match(/^\s*openai_base_url\s*=\s*"([^"]+)"/m)?.[1] ?? "https://api.openai.com/v1";
-  return { baseUrl: baseUrl.replace(/\/$/, ""), version: codexVersion(), auth: loadAuth() };
-};
-
-const headers = ({ auth, version }: Runtime): Record<string, string> => ({
-  version,
+const headers = ({ auth }: Runtime): Record<string, string> => ({
+  version: CODEX_VERSION,
   authorization: `Bearer ${auth.token}`,
   ...(auth.accountId ? { "chatgpt-account-id": auth.accountId } : {}),
   accept: "*/*",
   originator: ORIGINATOR,
-  "user-agent": userAgent(version),
+  "user-agent":
+    `${ORIGINATOR}/${CODEX_VERSION} (${platform()} ${release()}; ${arch()}) ` +
+    `terminal/${process.env.TERM ?? "unknown"}`,
   "content-type": "application/json",
 });
 
@@ -125,14 +108,26 @@ class HttpError extends Error {
 
 const generateImage = async (
   rt: Runtime,
-  body: { prompt: string; quality?: Quality; size?: Size; n: 1; background: "auto"; model: typeof MODEL },
+  body: {
+    prompt: string;
+    quality?: Quality;
+    size?: Size;
+    n: 1;
+    background: "auto";
+    model: typeof MODEL;
+  },
   signal?: AbortSignal,
 ): Promise<ImageResponse> => {
-  const url = `${rt.baseUrl}/images/generations`;
+  const url = `${rt.baseUrl}/codex/images/generations`;
 
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      const res = await fetch(url, { method: "POST", headers: headers(rt), body: JSON.stringify(body), signal });
+      const res = await fetch(url, {
+        method: "POST",
+        headers: headers(rt),
+        body: JSON.stringify(body),
+        signal,
+      });
       if (res.ok) return (await res.json()) as ImageResponse;
       throw new HttpError(res.status, (await res.text().catch(() => "")).slice(0, 500));
     } catch (err) {
@@ -164,7 +159,11 @@ const parseCmdArgs = (raw: string, keys: string[]) => {
 
 const Params = Type.Object({
   prompt: Type.String({ description: "图像生成提示词（英文最佳）" }),
-  save_to: Type.Optional(Type.String({ description: "保存路径（绝对或相对 cwd），默认 ./codex-image-<timestamp>.png" })),
+  save_to: Type.Optional(
+    Type.String({
+      description: "保存路径（绝对或相对 cwd），默认 ./codex-image-<timestamp>.png",
+    }),
+  ),
   size: Type.Optional(StringEnum(SIZE)),
   quality: Type.Optional(StringEnum(QUALITY)),
 });
@@ -173,13 +172,12 @@ export default function codexImageGen(pi: ExtensionAPI) {
   pi.registerTool({
     name: "image_codex",
     label: "Codex Image Generate",
-    description: "通过 Codex ChatGPT 认证调用 gpt-image-2 生图（无需 OPENAI_API_KEY），默认保存到当前工作目录。",
+    description: "gpt-image-2 生图，保存到当前目录。",
     promptSnippet: "Generate an image from a text prompt via Codex auth (gpt-image-2)",
-    promptGuidelines: ["使用 image_codex 时用英文提示词效果最佳。"],
     parameters: Params,
-    async execute(_id, params, signal, onUpdate) {
+    async execute(_id, params, signal, onUpdate, ctx) {
       const started = Date.now();
-      const rt = loadRuntime();
+      const rt = await loadRuntime(ctx);
       onUpdate?.({ content: [{ type: "text", text: `→ ${MODEL}：提交生成任务…` }] });
 
       const response = await generateImage(
@@ -208,7 +206,8 @@ export default function codexImageGen(pi: ExtensionAPI) {
             type: "text",
             text:
               `✅ ${path}\n` +
-              `size：${response.size ?? params.size ?? "auto"}；quality：${response.quality ?? params.quality ?? "auto"}` +
+              `size：${response.size ?? params.size ?? "auto"}；` +
+              `quality：${response.quality ?? params.quality ?? "auto"}` +
               (item.revised_prompt ? `\nrevised_prompt：${item.revised_prompt}` : ""),
           },
         ],
@@ -236,11 +235,15 @@ export default function codexImageGen(pi: ExtensionAPI) {
       }
       const started = Date.now();
       const key = "image-codex";
-      const tick = () => ctx.ui.setStatus(key, `生成中…已用时 ${((Date.now() - started) / 1000).toFixed(1)}s`);
+      const tick = () =>
+        ctx.ui.setStatus(
+          key,
+          `生成中…已用时 ${((Date.now() - started) / 1000).toFixed(1)}s`,
+        );
       tick();
       const timer = setInterval(tick, 500);
       try {
-        const rt = loadRuntime();
+        const rt = await loadRuntime(ctx);
         const response = await generateImage(rt, {
           model: MODEL,
           prompt,
@@ -255,7 +258,8 @@ export default function codexImageGen(pi: ExtensionAPI) {
         const seconds = ((Date.now() - started) / 1000).toFixed(1);
         ctx.ui.notify(`✓ ${path}（${seconds}s）`, "info");
       } catch (err) {
-        ctx.ui.notify(`image-codex 失败：${err instanceof Error ? err.message : String(err)}`, "error");
+        const message = err instanceof Error ? err.message : String(err);
+        ctx.ui.notify(`image-codex 失败：${message}`, "error");
       } finally {
         clearInterval(timer);
         ctx.ui.setStatus(key, undefined);
