@@ -1,0 +1,16 @@
+[package]
+name = "clipimg"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+arboard = { version = "3.6", default-features = false, features = ["image-data"] }
+base64 = "0.22"
+png = "0.18"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "z"
+panic = "abort"
+strip = true
