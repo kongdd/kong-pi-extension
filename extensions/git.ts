@@ -18,6 +18,11 @@ async function git(pi: ExtensionAPI, cwd: string, args: string[], ok = [0]) {
   return result.stdout;
 }
 
+async function isRepo(pi: ExtensionAPI, cwd: string) {
+  const r = await pi.exec("git", ["rev-parse", "--is-inside-work-tree"], { cwd, timeout: 5_000 });
+  return r.code === 0 && r.stdout.trim() === "true";
+}
+
 function paths(output: string) {
   return output.split("\0").filter(Boolean);
 }
@@ -149,6 +154,10 @@ export default function (pi: ExtensionAPI) {
     description: "分析 Git 修改或执行 Git 命令",
     handler: async (args, ctx) => {
       try {
+        if (!(await isRepo(pi, ctx.cwd))) {
+          ctx.ui.notify("当前目录不是 git 仓库", "error");
+          return;
+        }
         const command = args.trim();
         if (command === "yes") {
           ctx.ui.notify(await commit(pi, ctx.cwd, false), "info");
