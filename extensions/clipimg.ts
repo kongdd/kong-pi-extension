@@ -86,6 +86,10 @@ export default function clipimg(pi: ExtensionAPI) {
 		description: "Attach a PNG; clear [1,2,...] removes pending images",
 		handler: async (args, ctx) => {
 			const data = args.trim();
+			if (data === "saving") {
+				ctx.ui.notify("saving...", "info");
+				return;
+			}
 			if (/^clear(?:\s|$)/.test(data)) {
 				const spec = data.slice(5).trim();
 				if (!spec) {

@@ -3,7 +3,7 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 use arboard::Clipboard;
-use base64::{engine::general_purpose::STANDARD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use png::{BitDepth, ColorType, Compression, Encoder};
 
 const MAX_BASE64: usize = 24 * 1024 * 1024;
@@ -17,14 +17,14 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let pane = pane_id()?;
+    submit(&pane, b"/clipimg saving")?;
+
     let encoded = STANDARD.encode(clipboard_png()?);
     if encoded.len() > MAX_BASE64 {
         return Err("clipboard image exceeds the 24 MB limit".into());
     }
 
-    let command = format!("/clipimg {encoded}");
-    send(&pane, command.as_bytes(), false)?;
-    send(&pane, b"\r", true)
+    submit(&pane, format!("/clipimg {encoded}").as_bytes())
 }
 
 fn pane_id() -> Result<String, String> {
@@ -60,6 +60,11 @@ fn clipboard_png() -> Result<Vec<u8>, String> {
         .and_then(|mut writer| writer.write_image_data(image.bytes.as_ref()))
         .map_err(|error| format!("PNG encoding failed: {error}"))?;
     Ok(output)
+}
+
+fn submit(pane: &str, input: &[u8]) -> Result<(), String> {
+    send(pane, input, false)?;
+    send(pane, b"\r", true)
 }
 
 fn send(pane: &str, input: &[u8], raw: bool) -> Result<(), String> {
