@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import json
 import re
+import subprocess
+import tempfile
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -12,6 +14,7 @@ MODEL = "Qwen/Qwen-Audio-Chat"
 HOST = "127.0.0.1"
 PORT = 8001
 PROMPT = "请逐字转写该音频，只输出转写文本，不要解释。"
+CHUNK_SECONDS = 30
 
 
 def load_model():
@@ -36,16 +39,34 @@ def load_model():
 model, tokenizer = load_model()
 
 
-def transcribe(path):
-    audio = Path(path).expanduser().resolve(strict=True)
+def transcribe_chunk(path):
     query = tokenizer.from_list_format([
-        {"audio": str(audio)},
+        {"audio": str(path)},
         {"text": PROMPT},
     ])
     with torch.inference_mode():
         response, _ = model.chat(tokenizer, query=query, history=None)
     match = re.search(r'[“"]([^”"]+)[”"]', response)
     return match.group(1).strip() if match else response.strip()
+
+
+def transcribe(path):
+    audio = Path(path).expanduser().resolve(strict=True)
+    with tempfile.TemporaryDirectory(prefix="qwen-asr-") as temp_dir:
+        pattern = str(Path(temp_dir) / "%06d.wav")
+        subprocess.run(
+            [
+                "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
+                "-i", str(audio), "-f", "segment",
+                "-segment_time", str(CHUNK_SECONDS), "-reset_timestamps", "1",
+                "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", pattern,
+            ],
+            check=True,
+        )
+        chunks = sorted(Path(temp_dir).glob("*.wav"))
+        if not chunks:
+            raise ValueError("音频没有可识别内容")
+        return "".join(transcribe_chunk(chunk) for chunk in chunks)
 
 
 class Handler(BaseHTTPRequestHandler):

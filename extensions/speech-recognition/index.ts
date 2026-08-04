@@ -1,11 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 const SERVICE = process.env.QWEN_ASR_SERVICE ?? "qwen-audio.service";
-const URL = process.env.QWEN_AUDIO_URL ?? "http://127.0.0.1:8001";
+const AUDIO_URL = process.env.QWEN_AUDIO_URL ?? "http://127.0.0.1:8001";
+const SUBTITLE_SCRIPT = fileURLToPath(new URL("subtitles.py", import.meta.url));
 
 const Params = Type.Object({
   audio_path: Type.String({ description: "音频文件路径；相对路径基于当前工作目录" }),
@@ -47,7 +49,7 @@ function distance(a: string, b: string) {
 
 async function ready(signal?: AbortSignal) {
   try {
-    return (await fetch(`${URL}/health`, { signal })).ok;
+    return (await fetch(`${AUDIO_URL}/health`, { signal })).ok;
   } catch {
     return false;
   }
@@ -66,7 +68,7 @@ async function ensureService(pi: ExtensionAPI, signal?: AbortSignal) {
     await sleep(1_000, undefined, { signal });
     if (await ready(signal)) return;
   }
-  throw new Error(`语音识别服务未就绪：${URL}`);
+  throw new Error(`语音识别服务未就绪：${AUDIO_URL}`);
 }
 
 async function recognize(
@@ -78,7 +80,7 @@ async function recognize(
 ): Promise<Result> {
   await ensureService(pi, signal);
   const audioPath = absolute(cwd, audio);
-  const response = await fetch(`${URL}/transcribe`, {
+  const response = await fetch(`${AUDIO_URL}/transcribe`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ audio_path: audioPath }),
@@ -141,6 +143,37 @@ export default function speechRecognition(pi: ExtensionAPI) {
         const current = ctx.ui.getEditorText();
         ctx.ui.setEditorText(current ? `${current} ${result.transcript}` : result.transcript);
         ctx.ui.notify(format(result), "info");
+      } catch (error) {
+        ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+      } finally {
+        ctx.ui.setStatus("asr", undefined);
+      }
+    },
+  });
+
+  pi.registerCommand("asr-srt", {
+    description: "转写音频并生成字幕：/asr-srt <audio_path> [output.srt]",
+    handler: async (args, ctx) => {
+      const [audioArg, outputArg] = args.trim().split(/\s+/);
+      if (!audioArg) {
+        ctx.ui.notify("用法：/asr-srt <audio_path> [output.srt]", "warning");
+        return;
+      }
+
+      const audioPath = absolute(ctx.cwd, audioArg);
+      const outputPath = outputArg
+        ? absolute(ctx.cwd, outputArg)
+        : audioPath.replace(/\.[^.\\/]+$/, ".srt");
+      ctx.ui.setStatus("asr", "字幕识别中…");
+      try {
+        await ensureService(pi);
+        const result = await pi.exec(
+          "python",
+          [SUBTITLE_SCRIPT, audioPath, outputPath],
+          { timeout: 3_600_000 },
+        );
+        if (result.code !== 0) throw new Error(result.stderr.trim() || "字幕生成失败");
+        ctx.ui.notify(`字幕已生成：${outputPath}`, "info");
       } catch (error) {
         ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
       } finally {
