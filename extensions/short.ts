@@ -9,7 +9,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const REMINDER = [
   "输出要极其克制，言简意赅，以极其简短、凝练的语言回答问题；",
-  "代码编写尽可能简短，但排版要符合规范，不能牺牲代码的易读性。遵循Linux极简主义，一次做好一件事；",
+  "代码编写尽可能简短，但排版要符合规范，不能牺牲代码的易读性。遵循Linux极简主义，一次做好一件事；以最少的代码实现目标功能。",
 ].join("\n");
 
 export default function (pi: ExtensionAPI) {
