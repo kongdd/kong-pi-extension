@@ -1,4 +1,7 @@
 {
+  "settings": {
+    "mcpFooterStatus": "off"
+  },
   "mcpServers": {
     "codebase-memory-mcp": {
       "command": "/home/kong/.local/bin/codebase-memory-mcp",
