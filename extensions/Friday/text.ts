@@ -23,21 +23,15 @@ export function summarizeForSpeech(text: string, maxChars = 360): string {
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
     .replace(/`([^`]+)`/g, "$1")
     .replace(/[*_~#]/g, "")
+    .replace(/^\s*(?:[-+•]|\d+[.、])\s*/gm, "")
     .replace(/\r/g, "")
     .trim();
   if (!cleaned) return "";
 
-  const lines = cleaned.split("\n").map((l) => l.trim()).filter(Boolean);
-  const listRe = /^(?:[-+*•]|\d+[.、])\s*/;
-  const heading = lines.find((l) => l.length <= 80 && !listRe.test(l));
-  const bullets = lines.filter((l) => listRe.test(l)).map((l) => l.replace(listRe, ""));
-  const prose = lines.filter((l) => !listRe.test(l)).join(" ");
-  const sentences = prose.match(/[^。！？!?]+[。！？!?]?/g) ?? [prose];
-
-  const parts: string[] = [];
-  if (heading && heading !== sentences[0]) parts.push(heading);
-  parts.push(...(bullets.length ? bullets.slice(0, 3) : sentences.slice(0, 3)));
-
-  const summary = parts.join("。 ").replace(/\s+/g, " ").trim();
+  const summary = (cleaned.match(/[^。！？!?]+[。！？!?]?/g) ?? [cleaned])
+    .slice(0, 3)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
   return summary.length <= maxChars ? summary : `${summary.slice(0, maxChars - 1)}…`;
 }
