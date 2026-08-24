@@ -1,13 +1,19 @@
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import {
+	allocateImageId,
+	Container,
 	getCapabilities,
 	getImageDimensions,
+	Image,
 	renderImage,
 } from "@earendil-works/pi-tui";
 
 const MAX_BASE64 = 24 * 1024 * 1024;
+const MAX_PNG = (MAX_BASE64 / 4) * 3;
 const PNG_PREFIX = "iVBORw0KGgo";
+const IMAGE_URL = "http://127.0.0.1:17323/image";
+const TOKEN = process.env.CLIPIMG_TOKEN;
 const WIDGET_ID = "clipimg";
 const THUMB_W = 20;
 const THUMB_H = 6;
@@ -17,6 +23,7 @@ const SLOT_W = THUMB_W + GAP;
 /** WezTerm/Kitty 横排缩略图。 */
 class Thumbnails {
 	private cache?: { width: number; lines: string[] };
+	private ids: number[] = [];
 
 	constructor(
 		private images: ImageContent[],
@@ -39,7 +46,7 @@ class Thumbnails {
 		}
 
 		const limit = Math.max(1, Math.floor((width + GAP) / SLOT_W));
-		const previews = this.images.slice(0, limit).flatMap((image) => {
+		const previews = this.images.slice(0, limit).flatMap((image, i) => {
 			const dimensions = getImageDimensions(image.data, image.mimeType);
 			const rendered =
 				dimensions &&
@@ -47,6 +54,7 @@ class Thumbnails {
 					maxWidthCells: THUMB_W,
 					maxHeightCells: THUMB_H,
 					moveCursor: false,
+					imageId: (this.ids[i] ??= allocateImageId()),
 				});
 			return rendered ? [rendered] : [];
 		});
@@ -74,6 +82,21 @@ class Thumbnails {
 export default function clipimg(pi: ExtensionAPI) {
 	let pending: ImageContent[] = [];
 
+	pi.registerEntryRenderer<{ images: ImageContent[] }>(WIDGET_ID, (entry, _opts, theme) => {
+		const images = entry.data?.images ?? [];
+		if (!images.length) return;
+		const box = new Container();
+		for (const img of images) {
+			box.addChild(
+				new Image(img.data, img.mimeType, { fallbackColor: (s) => theme.fg("muted", s) }, {
+					maxWidthCells: THUMB_W,
+					maxHeightCells: THUMB_H,
+				}),
+			);
+		}
+		return box;
+	});
+
 	function update(ctx: ExtensionContext) {
 		const images = [...pending];
 		ctx.ui.setWidget(
@@ -83,12 +106,20 @@ export default function clipimg(pi: ExtensionAPI) {
 	}
 
 	pi.registerCommand("clipimg", {
-		description: "Attach a PNG; clear [1,2,...] removes pending images",
+		description: "Attach a PNG; no args reads :17323; clear [1,2,...] removes pending images",
 		handler: async (args, ctx) => {
-			const data = args.trim();
+			let data = args.trim();
 			if (data === "saving") {
 				ctx.ui.notify("saving...", "info");
 				return;
+			}
+			if (!data) {
+				try {
+					data = await fetchImage();
+				} catch (error) {
+					ctx.ui.notify(`clipimg HTTP：${error instanceof Error ? error.message : error}`, "error");
+					return;
+				}
 			}
 			if (/^clear(?:\s|$)/.test(data)) {
 				const spec = data.slice(5).trim();
@@ -133,12 +164,43 @@ export default function clipimg(pi: ExtensionAPI) {
 		const images = [...(event.images ?? []), ...pending];
 		pending = [];
 		update(ctx);
+		pi.appendEntry(WIDGET_ID, { images });
 		return { action: "transform", text: event.text, images };
 	});
 
 	pi.on("session_shutdown", () => {
 		pending = [];
 	});
+}
+
+async function fetchImage() {
+	const response = await fetch(IMAGE_URL, {
+		headers: TOKEN ? { "X-Clipimg-Token": TOKEN } : undefined,
+		signal: AbortSignal.timeout(10_000),
+	});
+	if (!response.ok) throw new Error(`HTTP ${response.status}`);
+	if (response.headers.get("content-type")?.split(";", 1)[0] !== "image/png") {
+		throw new Error("expected image/png");
+	}
+
+	const reader = response.body?.getReader();
+	if (!reader) throw new Error("empty response");
+	let size = 0;
+	const chunks: Buffer[] = [];
+	while (true) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		size += value.byteLength;
+		if (size > MAX_PNG) {
+			await reader.cancel();
+			throw new Error("image too large");
+		}
+		chunks.push(Buffer.from(value));
+	}
+
+	const data = Buffer.concat(chunks).toString("base64");
+	if (!isPng(data)) throw new Error("invalid PNG");
+	return data;
 }
 
 function isPng(data: string) {
