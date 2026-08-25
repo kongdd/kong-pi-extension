@@ -1,4 +1,4 @@
-# Launcher source: ~/.win-launch.c (Windows: C:\Users\hydro\.win-launch.c)
+# Launcher source: ~/.win-launch.c (Windows: %USERPROFILE%\.win-launch.c)
 win_path() {
     local drive input_path relative_path
 
@@ -35,7 +35,7 @@ win_launch() {
 
     ssh -o ControlMaster=auto -o ControlPersist=10m \
         -o ControlPath="$HOME/.ssh/cm-%C" kong \
-        "\"C:\\Users\\hydro\\.win-launch.exe\" \"$app\" \"$remote_path\""
+        "\"%USERPROFILE%\\.win-launch.exe\" \"$app\" \"$remote_path\""
 }
 
 win() {
@@ -66,4 +66,13 @@ code-ssh() {
     }
     win_launch 'C:\Program Files\Microsoft VS Code\Code.exe' \
         "--folder-uri=vscode-remote://ssh-remote+amd$(realpath -m -- "${1:-$PWD}")"
+}
+
+zed-ssh() {
+    [ "$#" -le 1 ] || {
+        printf 'Usage: zed-ssh [PATH]\n' >&2
+        return 2
+    }
+    win_launch Zed \
+        "ssh://amd:$(realpath -m -- "${1:-$PWD}")"
 }
