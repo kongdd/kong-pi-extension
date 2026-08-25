@@ -1,0 +1,12 @@
+[Unit]
+Description=clipimg HTTP inbox (127.0.0.1:17323)
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.pi/agent/clipimg
+ExecStart=%h/.local/bin/clipimg --serve
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
