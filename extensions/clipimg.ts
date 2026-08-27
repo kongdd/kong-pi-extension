@@ -31,10 +31,16 @@ const SIGNALS: Record<string, Signal> = {
   "\x1b[992~": "attach",
   "\x1b[993~": "failed",
 };
+const IMAGE_BEGIN = "\x1b[994~";
+const IMAGE_END = "\x1b[995~";
+const PASTE_BEGIN = "\x1b[200~";
+const PASTE_END = "\x1b[201~";
 
 /** `/clipimg` 是内部传图命令，不写入输入历史。 */
 class ClipimgEditor extends CustomEditor {
   onSignal?: (signal: Signal) => void;
+  onImage?: (data: string) => void;
+  private imageInput?: string;
 
   override addToHistory(text: string) {
     if (/^\/clipimg(?::\d+)?(?:\s|$)/.test(text)) return;
@@ -42,9 +48,37 @@ class ClipimgEditor extends CustomEditor {
   }
 
   override handleInput(data: string) {
+    if (this.imageInput !== undefined) return this.receiveImage(data);
+
+    const start = data.indexOf(IMAGE_BEGIN);
+    if (start >= 0) {
+      if (start) super.handleInput(data.slice(0, start));
+      this.imageInput = data.slice(start + IMAGE_BEGIN.length);
+      this.receiveImage("");
+      return;
+    }
+
     const signal = SIGNALS[data];
     if (!signal) return super.handleInput(data);
     this.onSignal?.(signal);
+  }
+
+  private receiveImage(data: string) {
+    if (data.startsWith(PASTE_BEGIN) && data.endsWith(PASTE_END)) {
+      data = data.slice(PASTE_BEGIN.length, -PASTE_END.length);
+    }
+    const input = this.imageInput! + data;
+    const end = input.indexOf(IMAGE_END);
+    if (end < 0 && input.length <= MAX_BASE64) {
+      this.imageInput = input;
+      return;
+    }
+
+    const image = input.slice(0, end < 0 ? undefined : end);
+    const rest = end < 0 ? "" : input.slice(end + IMAGE_END.length);
+    this.imageInput = undefined;
+    this.onImage?.(image);
+    if (rest) this.handleInput(rest);
   }
 }
 
@@ -109,7 +143,7 @@ class Thumbnails {
   }
 }
 
-/** 收图由外部 `clipimg --serve`（默认 :17323）提供，本扩展只 GET。 */
+/** 默认接收客户端私有帧；`/clipimg` 无参数时仍可从 HTTP 收件箱取图。 */
 export default function clipimg(pi: ExtensionAPI) {
   let pending: Shot[] = [];
   let savingAt: number | undefined;
@@ -117,6 +151,7 @@ export default function clipimg(pi: ExtensionAPI) {
   pi.on("session_start", (_event, ctx) => {
     ctx.ui.setEditorComponent((tui, theme, keybindings) => {
       const editor = new ClipimgEditor(tui, theme, keybindings);
+      editor.onImage = (data) => void handleCommand(data, ctx);
       editor.onSignal = (signal) => {
         if (signal === "failed") {
           savingAt = undefined;

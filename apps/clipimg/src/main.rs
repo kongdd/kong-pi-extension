@@ -1,5 +1,7 @@
 use std::env;
 
+use base64::{Engine, engine::general_purpose::STANDARD};
+
 mod cli;
 mod clipboard;
 mod http;
@@ -7,8 +9,8 @@ mod wezterm;
 
 use cli::{Target, target};
 use clipboard::clipboard_png;
-use http::{MAX_PNG, post_image, serve};
-use wezterm::{ATTACH, FAILED, SAVING, signal};
+use http::{MAX_BASE64, MAX_PNG, post_image, serve};
+use wezterm::send_image;
 
 fn main() {
     if let Err(error) = run() {
@@ -17,20 +19,18 @@ fn main() {
     }
 }
 
-/// 图片走 HTTP，私有控制信号只通知扩展，不提交编辑器内容。
+/// 默认把 PNG base64 通过私有帧发送给扩展；HTTP 仅由 `--http` 显式使用。
 fn run() -> Result<(), String> {
     match target(env::args().skip(1))? {
         Target::Serve => serve(),
         Target::Http => post_image(&load_png()?),
         Target::WezTerm(pane) => {
             let png = load_png()?;
-            signal(&pane, SAVING)?;
-            post_image(&png)
-                .and_then(|_| signal(&pane, ATTACH))
-                .map_err(|error| {
-                    let _ = signal(&pane, FAILED);
-                    error
-                })
+            let encoded = STANDARD.encode(&png);
+            if encoded.len() > MAX_BASE64 {
+                return Err("clipboard image exceeds the 24 MB limit".into());
+            }
+            send_image(&pane, &encoded)
         }
     }
 }
