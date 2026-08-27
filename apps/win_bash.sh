@@ -68,7 +68,7 @@ code-ssh() {
         "--folder-uri=vscode-remote://ssh-remote+amd$(realpath -m -- "${1:-$PWD}")"
 }
 
-zed-ssh() {
+zed() {
     [ "$#" -le 1 ] || {
         printf 'Usage: zed-ssh [PATH]\n' >&2
         return 2

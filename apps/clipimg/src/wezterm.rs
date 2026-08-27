@@ -1,17 +1,14 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-/// 向 pane 粘贴文本并回车提交。
-pub(crate) fn submit(pane: &str, input: &[u8]) -> Result<(), String> {
-    send(pane, input, false)?;
-    send(pane, b"\r", true)
-}
+pub(crate) const SAVING: &[u8] = b"\x1b[991~";
+pub(crate) const ATTACH: &[u8] = b"\x1b[992~";
+pub(crate) const FAILED: &[u8] = b"\x1b[993~";
 
-/// `wezterm cli send-text`；`raw` 时加 `--no-paste`（用于回车）。
-fn send(pane: &str, input: &[u8], raw: bool) -> Result<(), String> {
+/// 向 pane 发送 clipimg 私有控制信号，不提交编辑器内容。
+pub(crate) fn signal(pane: &str, input: &[u8]) -> Result<(), String> {
     let mut child = Command::new("wezterm.exe")
-        .args(["cli", "send-text", "--pane-id", pane])
-        .args(raw.then_some("--no-paste"))
+        .args(["cli", "send-text", "--pane-id", pane, "--no-paste"])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::inherit())

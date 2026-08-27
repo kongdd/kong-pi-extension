@@ -2,7 +2,7 @@
 
 从剪贴板取出一张图，送到本机一个小收件箱；再在 WezTerm 里敲 `/clipimg`，让对面自己来取。
 
-截图很大，不宜整段贴进终端。所以默认只传一句 `/clipimg`，图走旁边的 HTTP。收件箱没开时，才退回把 PNG 编成 base64 塞进命令。
+截图很大，不宜塞进终端，因此图片只走本机 HTTP；终端仅接收私有控制信号，不会自动回车。
 
 ## 日常用法
 
@@ -12,7 +12,7 @@
 clipimg "$WEZTERM_PANE"
 ```
 
-它会：把图 POST 到本机 → 在当前 pane 提交 `/clipimg`。对面收到这条命令后，再 GET 把图取走。
+它会：把图 POST 到本机 → 通知当前 pane 自动挂图。已有输入不受影响，也不会立即发送。
 
 另外两个入口：
 
@@ -21,7 +21,7 @@ clipimg --http    # 只把图送进收件箱，不碰终端
 clipimg --serve   # 开收件箱（通常交给 systemd）
 ```
 
-图大约超过 18 MB 会拒绝。走 base64 回退时上限约 24 MB。
+图片大约超过 18 MB 会拒绝。
 
 发送端通过 `wezterm.exe cli send-text` 把字打进 pane（WSL 调 Windows 上的 WezTerm）。
 
@@ -55,7 +55,7 @@ systemctl --user enable --now clipimg.service
 ### 1.3 剪贴板图片
 
 - **`clipimg.ts`** — 注册 `/clipimg`。无参数时从 `http://127.0.0.1:17323/image` GET PNG，挂到待发送队列；`clear [1,2,...]` 删除。扩展本身不监听端口。
-- **`clipimg/`** — Rust 收图服务。`clipimg --serve` 监听上述地址（POST 存图、GET 取走）；`clipimg PANE_ID` 读剪贴板后 POST，再向 WezTerm pane 发送 `/clipimg`；POST 失败则把 base64 内嵌进命令。地址与口令可用 `CLIPIMG_ADDR`、`CLIPIMG_TOKEN` 覆盖。
+- **`clipimg/`** — Rust 收图服务。`clipimg --serve` 监听上述地址（POST 存图、GET 取走）；`clipimg PANE_ID` 读剪贴板后 POST，再以私有控制信号通知对应 pane。地址与口令可用 `CLIPIMG_ADDR`、`CLIPIMG_TOKEN` 覆盖。
 
 ```bash
 cargo build --release --manifest-path clipimg/Cargo.toml
