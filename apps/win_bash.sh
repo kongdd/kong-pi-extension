@@ -59,6 +59,10 @@ smerge() {
     win smerge "$@"
 }
 
+start() {
+    win start "$@"
+}
+
 code-ssh() {
     [ "$#" -le 1 ] || {
         printf 'Usage: code-ssh [PATH]\n' >&2
