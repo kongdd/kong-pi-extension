@@ -1,4 +1,5 @@
 use std::env;
+use std::io::{self, Write};
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 
@@ -24,6 +25,9 @@ fn run() -> Result<(), String> {
     match target(env::args().skip(1))? {
         Target::Serve => serve(),
         Target::Http => post_image(&load_png()?),
+        Target::Stdout => io::stdout()
+            .write_all(&load_png()?)
+            .map_err(|e| format!("could not write PNG: {e}")),
         Target::WezTerm(pane) => {
             let png = load_png()?;
             let encoded = STANDARD.encode(&png);

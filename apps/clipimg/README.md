@@ -14,16 +14,27 @@ clipimg "$WEZTERM_PANE"
 
 它会：把图编成 base64，发送给扩展并加入待发送图片；你可继续修改文字，最后手动回车。
 
-另外两个入口：
+另外三个入口：
 
 ```bash
 clipimg --http    # 只把图送进收件箱，不碰终端
 clipimg --serve   # 开收件箱（通常交给 systemd）
+clipimg --stdout  # 输出 PNG，供 win-launch 经 SSH 回传
 ```
 
 图片大约超过 18 MB 会拒绝；base64 数据上限约 24 MB。
 
 发送端通过 `wezterm.exe cli send-text` 把字打进 pane（WSL 调 Windows 上的 WezTerm）。
+
+`Alt+Shift+V` 是高速路径：本地 Pi 直接调用 `clipimg.exe --stdout`；SSH 会话通过复用连接调用 Windows 桌面中的 `win-launch --clipboard`。两者都直接保存 PNG，不再经终端传输 base64。
+
+SSH 模式只需配置 Windows 的 SSH 别名：
+
+```bash
+export WIN_SSH_HOST=windows
+```
+
+其中 `clipimg.exe` 须在 Windows `PATH` 中，`.win-launch.exe --server` 须运行在桌面会话。
 
 ## 收件箱
 

@@ -23,6 +23,15 @@ win_path() {
     esac
 }
 
+win_ssh() {
+    [ -n "${WIN_SSH_HOST:-}" ] || {
+        printf 'win: set WIN_SSH_HOST\n' >&2
+        return 2
+    }
+    ssh -o ControlMaster=auto -o ControlPersist=10m \
+        -o ControlPath="$HOME/.ssh/cm-%C" "$WIN_SSH_HOST" "$@"
+}
+
 win_launch() {
     local app=$1 remote_path=$2
 
@@ -33,9 +42,13 @@ win_launch() {
             ;;
     esac
 
-    ssh -o ControlMaster=auto -o ControlPersist=10m \
-        -o ControlPath="$HOME/.ssh/cm-%C" kong \
+    win_ssh \
         "\"%USERPROFILE%\\.win-launch.exe\" \"$app\" \"$remote_path\""
+}
+
+# 输出 Windows 剪贴板 PNG；用法：win_clipboard > image.png
+win_clipboard() {
+    win_ssh '"%USERPROFILE%\.win-launch.exe" --clipboard'
 }
 
 win() {
@@ -68,8 +81,12 @@ code-ssh() {
         printf 'Usage: code-ssh [PATH]\n' >&2
         return 2
     }
+    [ -n "${REMOTE_SSH_HOST:-}" ] || {
+        printf 'code-ssh: set REMOTE_SSH_HOST\n' >&2
+        return 2
+    }
     win_launch 'C:\Program Files\Microsoft VS Code\Code.exe' \
-        "--folder-uri=vscode-remote://ssh-remote+amd$(realpath -m -- "${1:-$PWD}")"
+        "--folder-uri=vscode-remote://ssh-remote+$REMOTE_SSH_HOST$(realpath -m -- "${1:-$PWD}")"
 }
 
 zed() {
@@ -77,6 +94,10 @@ zed() {
         printf 'Usage: zed-ssh [PATH]\n' >&2
         return 2
     }
+    [ -n "${REMOTE_SSH_HOST:-}" ] || {
+        printf 'zed: set REMOTE_SSH_HOST\n' >&2
+        return 2
+    }
     win_launch Zed \
-        "ssh://amd:$(realpath -m -- "${1:-$PWD}")"
+        "ssh://$REMOTE_SSH_HOST:$(realpath -m -- "${1:-$PWD}")"
 }

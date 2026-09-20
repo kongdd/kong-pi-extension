@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CustomEditor, type ExtensionAPI, type ExtensionContext, type Theme } from "@earendil-works/pi-coding-agent";
@@ -200,8 +201,8 @@ export default function clipimg(pi: ExtensionAPI) {
     );
   }
 
-  function attach(data: string, ctx: ExtensionContext) {
-    if (!isPng(data)) {
+  function attach(data: string | Buffer, ctx: ExtensionContext) {
+    if (typeof data === "string" ? !isPng(data) : !isPngBuffer(data)) {
       ctx.ui.notify("clipimg：图片数据无效", "error");
       return false;
     }
@@ -213,8 +214,15 @@ export default function clipimg(pi: ExtensionAPI) {
   async function handleCommand(args: string, ctx: ExtensionContext) {
     let data = args.trim();
     if (data === "saving") {
-      savingAt = performance.now();
+      const started = performance.now();
       ctx.ui.notify("saving...", "info");
+      try {
+        if (attach(await fetchClipboard(), ctx)) {
+          ctx.ui.notify(`saving used ${((performance.now() - started) / 1000).toFixed(2)}s`, "info");
+        }
+      } catch (error) {
+        ctx.ui.notify(`clipimg：${error instanceof Error ? error.message : error}`, "error");
+      }
       return;
     }
     if (/^clear(?:\s|$)/.test(data)) {
@@ -286,6 +294,36 @@ export default function clipimg(pi: ExtensionAPI) {
   });
 }
 
+function fetchClipboard() {
+  const remote = Boolean(process.env.SSH_CONNECTION);
+  const host = process.env.WIN_SSH_HOST ?? "";
+  if (remote && !host) throw new Error("请设置 WIN_SSH_HOST");
+
+  const command = remote ? "ssh" : "clipimg.exe";
+  const args = remote
+    ? [
+      "-o", "BatchMode=yes",
+      "-o", "ConnectTimeout=3",
+      "-o", "ControlMaster=auto",
+      "-o", "ControlPersist=10m",
+      "-o", `ControlPath=${process.env.HOME}/.ssh/cm-%C`,
+      host,
+      `"%USERPROFILE%\\.win-launch.exe" --clipboard`,
+    ]
+    : ["--stdout"];
+
+  return new Promise<Buffer>((resolve, reject) => {
+    execFile(
+      command,
+      args,
+      { encoding: null, maxBuffer: MAX_PNG, timeout: 10_000 },
+      (error, stdout, stderr) => error
+        ? reject(new Error(stderr.toString().trim() || error.message))
+        : resolve(stdout),
+    );
+  });
+}
+
 async function fetchImage() {
   const response = await fetch(`http://${process.env.CLIPIMG_ADDR ?? "127.0.0.1:17323"}/image`, {
     headers: TOKEN ? { "X-Clipimg-Token": TOKEN } : undefined,
@@ -302,11 +340,12 @@ async function fetchImage() {
   return data;
 }
 
-function save(data: string): Shot {
+function save(data: string | Buffer): Shot {
+  const png = typeof data === "string" ? Buffer.from(data, "base64") : data;
   mkdirSync(DIR, { recursive: true });
   const path = join(DIR, `${Date.now()}.png`);
-  writeFileSync(path, Buffer.from(data, "base64"));
-  return { path, kb: kb(data) };
+  writeFileSync(path, png);
+  return { path, kb: Math.floor(png.length / 1024) };
 }
 
 function loadPng(path: string) {
@@ -329,4 +368,8 @@ function isPng(data: string) {
     data.startsWith(PNG_PREFIX) &&
     /^[A-Za-z0-9+/]+={0,2}$/.test(data)
   );
+}
+
+function isPngBuffer(data: Buffer) {
+  return data.length <= MAX_PNG && data.subarray(0, 8).toString("hex") === "89504e470d0a1a0a";
 }
