@@ -7,6 +7,7 @@ config.keys = {
 		key = "v",
 		mods = "ALT",
 		action = wezterm.action_callback(function(_, pane)
+			pane:send_text("\x1b[994~")
 			wezterm.background_child_process({ "clipimg.exe", tostring(pane:pane_id()) })
 		end),
 	},

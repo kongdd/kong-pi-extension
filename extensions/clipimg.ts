@@ -15,7 +15,6 @@ import {
 const MAX_BASE64 = 24 * 1024 * 1024;
 const MAX_PNG = (MAX_BASE64 / 4) * 3;
 const PNG_PREFIX = "iVBORw0KGgo";
-const TOKEN = process.env.CLIPIMG_TOKEN;
 const WIDGET_ID = "clipimg";
 const THUMB_W = 20;
 const THUMB_H = 6;
@@ -24,20 +23,13 @@ const SLOT_W = THUMB_W + GAP;
 const DIR = join(import.meta.dirname, "..", "media", "clipimg");
 
 type Shot = { path: string; kb: number };
-type Details = { files?: { path: string; kb: number }[] };
-type Signal = "saving" | "attach" | "failed";
-
-const SIGNALS: Record<string, Signal> = {
-  "\x1b[991~": "saving",
-  "\x1b[992~": "attach",
-  "\x1b[993~": "failed",
-};
+type Details = { files?: Shot[] };
 const PASTE_BEGIN = "\x1b[200~";
 const PASTE_END = "\x1b[201~";
 
 /** `/clipimg` 是内部传图命令，不写入输入历史。 */
 class ClipimgEditor extends CustomEditor {
-  onSignal?: (signal: Signal) => void;
+  onSignal?: (start: boolean) => void;
   onImage?: (data: string) => void;
 
   override addToHistory(text: string) {
@@ -54,9 +46,11 @@ class ClipimgEditor extends CustomEditor {
       }
     }
 
-    const signal = SIGNALS[data];
-    if (!signal) return super.handleInput(data);
-    this.onSignal?.(signal);
+    if (data === "\x1b[991~" || data === "\x1b[994~") {
+      this.onSignal?.(data === "\x1b[994~");
+      return;
+    }
+    super.handleInput(data);
   }
 }
 
@@ -121,7 +115,7 @@ class Thumbnails {
   }
 }
 
-/** 默认接收客户端私有帧；`/clipimg` 无参数时仍可从 HTTP 收件箱取图。 */
+/** 接收 WezTerm 私有帧，并管理待发送图片。 */
 export default function clipimg(pi: ExtensionAPI) {
   let pending: Shot[] = [];
   let savingAt: number | undefined;
@@ -130,13 +124,13 @@ export default function clipimg(pi: ExtensionAPI) {
     ctx.ui.setEditorComponent((tui, theme, keybindings) => {
       const editor = new ClipimgEditor(tui, theme, keybindings);
       editor.onImage = (data) => void handleCommand(data, ctx);
-      editor.onSignal = (signal) => {
-        if (signal === "failed") {
-          savingAt = undefined;
-          ctx.ui.notify("clipimg：上传失败", "error");
+      editor.onSignal = (start) => {
+        if (start) {
+          savingAt = performance.now();
+          ctx.ui.notify("saving...", "info");
           return;
         }
-        void handleCommand(signal === "saving" ? "saving" : "", ctx);
+        void handleCommand("saving", ctx);
       };
       return editor;
     });
@@ -144,32 +138,17 @@ export default function clipimg(pi: ExtensionAPI) {
 
   pi.registerMessageRenderer(WIDGET_ID, (message, { outputPad }, theme) => {
     const box = new Box(outputPad, 0, (t) => theme.bg("userMessageBg", t));
-    const files = (message.details as Details | undefined)?.files;
-    if (files?.length) {
-      for (const [i, file] of files.entries()) {
-        const data = loadPng(file.path);
-        if (!data) continue;
-        box.addChild(
-          new Image(data, "image/png", { fallbackColor: (s) => theme.fg("muted", s) }, {
-            maxWidthCells: THUMB_W,
-            maxHeightCells: THUMB_H,
-          }),
-        );
-        box.addChild(new Text(theme.fg("muted", `[${i + 1}] ${file.kb} KB`), 0, 0));
-      }
-    } else {
-      const parts = typeof message.content === "string" ? [] : message.content;
-      let i = 0;
-      for (const part of parts) {
-        if (part.type !== "image") continue;
-        box.addChild(
-          new Image(part.data, part.mimeType, { fallbackColor: (s) => theme.fg("muted", s) }, {
-            maxWidthCells: THUMB_W,
-            maxHeightCells: THUMB_H,
-          }),
-        );
-        box.addChild(new Text(theme.fg("muted", `[${++i}] ${kb(part.data)} KB`), 0, 0));
-      }
+    const files = (message.details as Details | undefined)?.files ?? [];
+    for (const [i, file] of files.entries()) {
+      const data = loadPng(file.path);
+      if (!data) continue;
+      box.addChild(
+        new Image(data, "image/png", { fallbackColor: (s) => theme.fg("muted", s) }, {
+          maxWidthCells: THUMB_W,
+          maxHeightCells: THUMB_H,
+        }),
+      );
+      box.addChild(new Text(theme.fg("muted", `[${i + 1}] ${file.kb} KB`), 0, 0));
     }
     const text = typeof message.content === "string"
       ? message.content
@@ -202,18 +181,19 @@ export default function clipimg(pi: ExtensionAPI) {
   }
 
   function attach(data: string | Buffer, ctx: ExtensionContext) {
-    if (typeof data === "string" ? !isPng(data) : !isPngBuffer(data)) {
+    const png = toPng(data);
+    if (!png) {
       ctx.ui.notify("clipimg：图片数据无效", "error");
       return false;
     }
-    pending.push(save(data));
+    pending.push(save(png));
     update(ctx);
     return true;
   }
 
   async function handleCommand(args: string, ctx: ExtensionContext) {
-    let data = args.trim();
-    if (data === "saving") {
+    const data = args.trim();
+    if (!data || data === "saving") {
       const started = performance.now();
       ctx.ui.notify("saving...", "info");
       try {
@@ -250,17 +230,7 @@ export default function clipimg(pi: ExtensionAPI) {
       ctx.ui.notify(`已删除第 ${indices.join(",")} 张图片`, "info");
       return;
     }
-    savingAt ??= performance.now();
-    if (!data) {
-      try {
-        data = await fetchImage();
-      } catch (error) {
-        savingAt = undefined;
-        ctx.ui.notify(`clipimg HTTP：${error instanceof Error ? error.message : error}`, "error");
-        return;
-      }
-    }
-    const started = savingAt;
+    const started = savingAt ?? performance.now();
     savingAt = undefined;
     if (attach(data, ctx)) {
       ctx.ui.notify(`saving used ${((performance.now() - started) / 1000).toFixed(2)}s`, "info");
@@ -268,7 +238,7 @@ export default function clipimg(pi: ExtensionAPI) {
   }
 
   pi.registerCommand("clipimg", {
-    description: "Attach a PNG; no args GETs http://127.0.0.1:17323/image; clear [1,2,...] removes pending images",
+    description: "Attach the clipboard image; clear [1,2,...] removes pending images",
     handler: handleCommand,
   });
 
@@ -289,9 +259,6 @@ export default function clipimg(pi: ExtensionAPI) {
     return { action: "handled" };
   });
 
-  pi.on("session_shutdown", () => {
-    pending = [];
-  });
 }
 
 function fetchClipboard() {
@@ -324,24 +291,7 @@ function fetchClipboard() {
   });
 }
 
-async function fetchImage() {
-  const response = await fetch(`http://${process.env.CLIPIMG_ADDR ?? "127.0.0.1:17323"}/image`, {
-    headers: TOKEN ? { "X-Clipimg-Token": TOKEN } : undefined,
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  if (response.headers.get("content-type")?.split(";", 1)[0] !== "image/png") {
-    throw new Error("expected image/png");
-  }
-  const buf = Buffer.from(await response.arrayBuffer());
-  if (buf.length > MAX_PNG) throw new Error("image too large");
-  const data = buf.toString("base64");
-  if (!isPng(data)) throw new Error("invalid PNG");
-  return data;
-}
-
-function save(data: string | Buffer): Shot {
-  const png = typeof data === "string" ? Buffer.from(data, "base64") : data;
+function save(png: Buffer): Shot {
   mkdirSync(DIR, { recursive: true });
   const path = join(DIR, `${Date.now()}.png`);
   writeFileSync(path, png);
@@ -350,26 +300,21 @@ function save(data: string | Buffer): Shot {
 
 function loadPng(path: string) {
   try {
-    const data = readFileSync(path).toString("base64");
-    return isPng(data) ? data : undefined;
+    const png = readFileSync(path);
+    return isPng(png) ? png.toString("base64") : undefined;
   } catch {
     return;
   }
 }
 
-function kb(data: string) {
-  return Math.floor((data.length * 3) / 4 / 1024);
+function toPng(data: string | Buffer) {
+  if (typeof data === "string") {
+    if (data.length > MAX_BASE64 || data.length % 4 || !/^[A-Za-z0-9+/]+={0,2}$/.test(data)) return;
+    data = Buffer.from(data, "base64");
+  }
+  return isPng(data) ? data : undefined;
 }
 
-function isPng(data: string) {
-  return (
-    data.length <= MAX_BASE64 &&
-    data.length % 4 === 0 &&
-    data.startsWith(PNG_PREFIX) &&
-    /^[A-Za-z0-9+/]+={0,2}$/.test(data)
-  );
-}
-
-function isPngBuffer(data: Buffer) {
+function isPng(data: Buffer) {
   return data.length <= MAX_PNG && data.subarray(0, 8).toString("hex") === "89504e470d0a1a0a";
 }

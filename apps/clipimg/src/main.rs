@@ -5,13 +5,14 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 
 mod cli;
 mod clipboard;
-mod http;
 mod wezterm;
 
 use cli::{Target, target};
 use clipboard::clipboard_png;
-use http::{MAX_BASE64, MAX_PNG, post_image, serve};
 use wezterm::send_image;
+
+const MAX_BASE64: usize = 24 * 1024 * 1024;
+const MAX_PNG: usize = MAX_BASE64 / 4 * 3;
 
 fn main() {
     if let Err(error) = run() {
@@ -20,11 +21,9 @@ fn main() {
     }
 }
 
-/// 默认把 PNG base64 通过私有帧发送给扩展；HTTP 仅由 `--http` 显式使用。
+/// 把剪贴板图像输出为 PNG，或发送到 WezTerm pane。
 fn run() -> Result<(), String> {
     match target(env::args().skip(1))? {
-        Target::Serve => serve(),
-        Target::Http => post_image(&load_png()?),
         Target::Stdout => io::stdout()
             .write_all(&load_png()?)
             .map_err(|e| format!("could not write PNG: {e}")),
