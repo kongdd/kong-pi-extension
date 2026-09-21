@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 arboard = { version = "3.6", default-features = false, features = ["image-data"] }
-base64 = "0.22"
 png = "0.18"
 
 [profile.release]

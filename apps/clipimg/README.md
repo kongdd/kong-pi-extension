@@ -4,10 +4,9 @@
 
 ## 快捷键
 
-- `Alt+V`：PNG 经 WezTerm 发送，兼容路径。
-- `Alt+Shift+V`：PNG 二进制直传，推荐路径。
+Pi 扩展原生注册 `Alt+V`，无需配置 WezTerm；图片保存为本地 PNG，不经过终端文本传输。
 
-高速路径会自动识别运行环境：本地直接执行 `clipimg.exe --stdout`；SSH 会话通过 `win-launch` 从 Windows 桌面读取剪贴板。
+扩展会自动识别运行环境：本地直接执行 `clipimg.exe --stdout`；SSH 会话通过 `win-launch` 从 Windows 桌面读取剪贴板。
 
 SSH 模式只需设置 Windows 的 SSH 别名：
 
@@ -20,11 +19,10 @@ export WIN_SSH_HOST=windows
 ## 命令
 
 ```bash
-clipimg PANE_ID   # PNG 经 WezTerm 发送
 clipimg --stdout  # 输出 PNG 二进制
 ```
 
-图片上限约 18 MB；WezTerm base64 路径上限约 24 MB。
+图片上限为 18 MB。
 
 ## 构建
 

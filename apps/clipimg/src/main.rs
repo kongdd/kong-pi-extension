@@ -1,18 +1,11 @@
 use std::env;
 use std::io::{self, Write};
 
-use base64::{Engine, engine::general_purpose::STANDARD};
-
-mod cli;
 mod clipboard;
-mod wezterm;
 
-use cli::{Target, target};
 use clipboard::clipboard_png;
-use wezterm::send_image;
 
-const MAX_BASE64: usize = 24 * 1024 * 1024;
-const MAX_PNG: usize = MAX_BASE64 / 4 * 3;
+const MAX_PNG: usize = 18 * 1024 * 1024;
 
 fn main() {
     if let Err(error) = run() {
@@ -21,21 +14,14 @@ fn main() {
     }
 }
 
-/// 把剪贴板图像输出为 PNG，或发送到 WezTerm pane。
+/// 把剪贴板图像输出为 PNG。
 fn run() -> Result<(), String> {
-    match target(env::args().skip(1))? {
-        Target::Stdout => io::stdout()
-            .write_all(&load_png()?)
-            .map_err(|e| format!("could not write PNG: {e}")),
-        Target::WezTerm(pane) => {
-            let png = load_png()?;
-            let encoded = STANDARD.encode(&png);
-            if encoded.len() > MAX_BASE64 {
-                return Err("clipboard image exceeds the 24 MB limit".into());
-            }
-            send_image(&pane, &encoded)
-        }
+    if env::args().skip(1).collect::<Vec<_>>() != ["--stdout"] {
+        return Err("usage: clipimg --stdout".into());
     }
+    io::stdout()
+        .write_all(&load_png()?)
+        .map_err(|e| format!("could not write PNG: {e}"))
 }
 
 fn load_png() -> Result<Vec<u8>, String> {

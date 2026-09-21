@@ -12,9 +12,7 @@ import {
   Text,
 } from "@earendil-works/pi-tui";
 
-const MAX_BASE64 = 24 * 1024 * 1024;
-const MAX_PNG = (MAX_BASE64 / 4) * 3;
-const PNG_PREFIX = "iVBORw0KGgo";
+const MAX_PNG = 18 * 1024 * 1024;
 const WIDGET_ID = "clipimg";
 const THUMB_W = 20;
 const THUMB_H = 6;
@@ -24,35 +22,6 @@ const DIR = join(import.meta.dirname, "..", "media", "clipimg");
 
 type Shot = { path: string; kb: number };
 type Details = { files?: Shot[] };
-const PASTE_BEGIN = "\x1b[200~";
-const PASTE_END = "\x1b[201~";
-
-/** `/clipimg` 是内部传图命令，不写入输入历史。 */
-class ClipimgEditor extends CustomEditor {
-  onSignal?: (start: boolean) => void;
-  onImage?: (data: string) => void;
-
-  override addToHistory(text: string) {
-    if (/^\/clipimg(?::\d+)?(?:\s|$)/.test(text)) return;
-    super.addToHistory(text);
-  }
-
-  override handleInput(data: string) {
-    if (data.startsWith(PASTE_BEGIN) && data.endsWith(PASTE_END)) {
-      const pasted = data.slice(PASTE_BEGIN.length, -PASTE_END.length);
-      if (pasted.startsWith(PNG_PREFIX)) {
-        this.onImage?.(pasted);
-        return;
-      }
-    }
-
-    if (data === "\x1b[991~" || data === "\x1b[994~") {
-      this.onSignal?.(data === "\x1b[994~");
-      return;
-    }
-    super.handleInput(data);
-  }
-}
 
 /** WezTerm/Kitty 横排缩略图。 */
 class Thumbnails {
@@ -115,23 +84,14 @@ class Thumbnails {
   }
 }
 
-/** 接收 WezTerm 私有帧，并管理待发送图片。 */
+/** 管理待发送图片。 */
 export default function clipimg(pi: ExtensionAPI) {
   let pending: Shot[] = [];
-  let savingAt: number | undefined;
 
   pi.on("session_start", (_event, ctx) => {
     ctx.ui.setEditorComponent((tui, theme, keybindings) => {
-      const editor = new ClipimgEditor(tui, theme, keybindings);
-      editor.onImage = (data) => void handleCommand(data, ctx);
-      editor.onSignal = (start) => {
-        if (start) {
-          savingAt = performance.now();
-          ctx.ui.notify("saving...", "info");
-          return;
-        }
-        void handleCommand("saving", ctx);
-      };
+      const editor = new CustomEditor(tui, theme, keybindings);
+      editor.onPasteImage = () => void handleCommand("", ctx);
       return editor;
     });
   });
@@ -180,26 +140,15 @@ export default function clipimg(pi: ExtensionAPI) {
     );
   }
 
-  function attach(data: string | Buffer, ctx: ExtensionContext) {
-    const png = toPng(data);
-    if (!png) {
-      ctx.ui.notify("clipimg：图片数据无效", "error");
-      return false;
-    }
-    pending.push(save(png));
-    update(ctx);
-    return true;
-  }
-
   async function handleCommand(args: string, ctx: ExtensionContext) {
     const data = args.trim();
-    if (!data || data === "saving") {
+    if (!data) {
       const started = performance.now();
       ctx.ui.notify("saving...", "info");
       try {
-        if (attach(await fetchClipboard(), ctx)) {
-          ctx.ui.notify(`saving used ${((performance.now() - started) / 1000).toFixed(2)}s`, "info");
-        }
+        pending.push(save(await fetchClipboard()));
+        update(ctx);
+        ctx.ui.notify(`saving used ${((performance.now() - started) / 1000).toFixed(2)}s`, "info");
       } catch (error) {
         ctx.ui.notify(`clipimg：${error instanceof Error ? error.message : error}`, "error");
       }
@@ -230,11 +179,7 @@ export default function clipimg(pi: ExtensionAPI) {
       ctx.ui.notify(`已删除第 ${indices.join(",")} 张图片`, "info");
       return;
     }
-    const started = savingAt ?? performance.now();
-    savingAt = undefined;
-    if (attach(data, ctx)) {
-      ctx.ui.notify(`saving used ${((performance.now() - started) / 1000).toFixed(2)}s`, "info");
-    }
+    ctx.ui.notify("clipimg：参数无效", "error");
   }
 
   pi.registerCommand("clipimg", {
@@ -244,7 +189,7 @@ export default function clipimg(pi: ExtensionAPI) {
 
   pi.on("input", (event, ctx) => {
     if (event.source !== "interactive" || pending.length === 0) return { action: "continue" };
-    const files = pending.map(({ path, kb }) => ({ path, kb }));
+    const files = pending;
     pending = [];
     update(ctx);
     pi.sendMessage(
@@ -284,9 +229,11 @@ function fetchClipboard() {
       command,
       args,
       { encoding: null, maxBuffer: MAX_PNG, timeout: 10_000 },
-      (error, stdout, stderr) => error
-        ? reject(new Error(stderr.toString().trim() || error.message))
-        : resolve(stdout),
+      (error, stdout, stderr) => {
+        if (error) reject(new Error(stderr.toString().trim() || error.message));
+        else if (!isPng(stdout)) reject(new Error("图片数据无效"));
+        else resolve(stdout);
+      },
     );
   });
 }
@@ -305,14 +252,6 @@ function loadPng(path: string) {
   } catch {
     return;
   }
-}
-
-function toPng(data: string | Buffer) {
-  if (typeof data === "string") {
-    if (data.length > MAX_BASE64 || data.length % 4 || !/^[A-Za-z0-9+/]+={0,2}$/.test(data)) return;
-    data = Buffer.from(data, "base64");
-  }
-  return isPng(data) ? data : undefined;
 }
 
 function isPng(data: Buffer) {
