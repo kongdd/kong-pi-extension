@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { CustomEditor, type ExtensionAPI, type ExtensionContext, type Theme } from "@earendil-works/pi-coding-agent";
+import { promisify } from "node:util";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import {
   allocateImageId,
   Box,
@@ -12,6 +13,7 @@ import {
   Text,
 } from "@earendil-works/pi-tui";
 
+const execFileAsync = promisify(execFile);
 const MAX_PNG = 18 * 1024 * 1024;
 const WIDGET_ID = "clipimg";
 const THUMB_W = 20;
@@ -88,12 +90,9 @@ class Thumbnails {
 export default function clipimg(pi: ExtensionAPI) {
   let pending: Shot[] = [];
 
-  pi.on("session_start", (_event, ctx) => {
-    ctx.ui.setEditorComponent((tui, theme, keybindings) => {
-      const editor = new CustomEditor(tui, theme, keybindings);
-      editor.onPasteImage = () => void handleCommand("", ctx);
-      return editor;
-    });
+  pi.registerShortcut("alt+v", {
+    description: "Attach the clipboard image",
+    handler: (ctx) => void handleCommand("", ctx),
   });
 
   pi.registerMessageRenderer(WIDGET_ID, (message, { outputPad }, theme) => {
@@ -146,7 +145,7 @@ export default function clipimg(pi: ExtensionAPI) {
       const started = performance.now();
       ctx.ui.notify("saving...", "info");
       try {
-        pending.push(save(await fetchClipboard()));
+        pending.push(await captureClipboard());
         update(ctx);
         ctx.ui.notify(`saving used ${((performance.now() - started) / 1000).toFixed(2)}s`, "info");
       } catch (error) {
@@ -206,11 +205,13 @@ export default function clipimg(pi: ExtensionAPI) {
 
 }
 
-function fetchClipboard() {
+async function captureClipboard(): Promise<Shot> {
   const remote = Boolean(process.env.SSH_CONNECTION);
   const host = process.env.WIN_SSH_HOST ?? "";
   if (remote && !host) throw new Error("请设置 WIN_SSH_HOST");
 
+  mkdirSync(DIR, { recursive: true });
+  const path = join(DIR, `${Date.now()}.png`);
   const command = remote ? "ssh" : "clipimg.exe";
   const args = remote
     ? [
@@ -222,27 +223,17 @@ function fetchClipboard() {
       host,
       `"%USERPROFILE%\\.win-launch.exe" --clipboard`,
     ]
-    : ["--stdout"];
-
-  return new Promise<Buffer>((resolve, reject) => {
-    execFile(
-      command,
-      args,
-      { encoding: null, maxBuffer: MAX_PNG, timeout: 10_000 },
-      (error, stdout, stderr) => {
-        if (error) reject(new Error(stderr.toString().trim() || error.message));
-        else if (!isPng(stdout)) reject(new Error("图片数据无效"));
-        else resolve(stdout);
-      },
-    );
+    : ["--output", path];
+  const { stdout } = await execFileAsync(command, args, {
+    encoding: null,
+    maxBuffer: MAX_PNG,
+    timeout: 10_000,
   });
-}
-
-function save(png: Buffer): Shot {
-  mkdirSync(DIR, { recursive: true });
-  const path = join(DIR, `${Date.now()}.png`);
-  writeFileSync(path, png);
-  return { path, kb: Math.floor(png.length / 1024) };
+  if (remote) {
+    if (!isPng(stdout)) throw new Error("图片数据无效");
+    writeFileSync(path, stdout);
+  }
+  return { path, kb: Math.floor(statSync(path).size / 1024) };
 }
 
 function loadPng(path: string) {

@@ -4,9 +4,9 @@
 
 ## 快捷键
 
-Pi 扩展原生注册 `Alt+V`，无需配置 WezTerm；图片保存为本地 PNG，不经过终端文本传输。
+Pi 扩展注册 `Alt+V`；`keybindings.json` 已禁用同键的内置剪贴板处理，无需配置 WezTerm。图片保存为本地 PNG，不经过终端文本传输。
 
-扩展会自动识别运行环境：本地直接执行 `clipimg.exe --stdout`；SSH 会话通过 `win-launch` 从 Windows 桌面读取剪贴板。
+扩展会自动识别运行环境：本地由 `clipimg.exe --output PATH` 直接保存；SSH 会话通过 `win-launch` 从 Windows 桌面读取剪贴板。
 
 SSH 模式只需设置 Windows 的 SSH 别名：
 
@@ -19,7 +19,8 @@ export WIN_SSH_HOST=windows
 ## 命令
 
 ```bash
-clipimg --stdout  # 输出 PNG 二进制
+clipimg --stdout           # 输出 PNG 二进制
+clipimg --output shot.png  # 保存到指定路径
 ```
 
 图片上限为 18 MB。
