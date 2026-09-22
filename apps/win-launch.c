@@ -43,28 +43,36 @@ static BOOL transfer(HANDLE pipe, void *buffer, DWORD size, BOOL write)
 static DWORD launch(const wchar_t *app, const wchar_t *path)
 {
     wchar_t resolved[MAX_CHARS + 1];
-    DWORD length = SearchPathW(
-        NULL, app, L".exe", MAX_CHARS, resolved, NULL
-    );
+    DWORD length = SearchPathW(NULL, app, L".exe", MAX_CHARS,
+                               resolved, NULL);
     const wchar_t *exe = length && length <= MAX_CHARS ? resolved : app;
 
-    wchar_t parameters[MAX_CHARS + 1];
-    if (swprintf(parameters, MAX_CHARS + 1, L"\"%ls\"", path) < 0)
+    wchar_t command[MAX_CHARS + 1];
+    if (swprintf(command, MAX_CHARS + 1,
+                 L"\"%ls\" \"%ls\"", exe, path) < 0)
         return ERROR_BUFFER_OVERFLOW;
 
-    INT_PTR result = (INT_PTR)ShellExecuteW(
-        NULL, NULL, exe, parameters, NULL, SW_SHOWNORMAL
-    );
-    return result > 32 ? ERROR_SUCCESS : (DWORD)result;
+    STARTUPINFOW startup = {0};
+    PROCESS_INFORMATION process;
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESHOWWINDOW;
+    startup.wShowWindow = SW_SHOWNORMAL;
+
+    if (!CreateProcessW(NULL, command, NULL, NULL, FALSE, CREATE_NO_WINDOW,
+                        NULL, NULL, &startup, &process))
+        return GetLastError();
+
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return ERROR_SUCCESS;
 }
 
 /* Run clipimg in the desktop session and capture its output. */
 static DWORD capture_clipboard(BYTE **output, DWORD *output_size)
 {
     wchar_t exe[MAX_CHARS + 1];
-    DWORD length = SearchPathW(
-        NULL, L"clipimg.exe", NULL, MAX_CHARS, exe, NULL
-    );
+    DWORD length = SearchPathW(NULL, L"clipimg.exe", NULL, MAX_CHARS,
+                               exe, NULL);
     if (!length || length > MAX_CHARS)
         return ERROR_FILE_NOT_FOUND;
 
@@ -84,8 +92,7 @@ static DWORD capture_clipboard(BYTE **output, DWORD *output_size)
         temp_file, GENERIC_READ | GENERIC_WRITE,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         &security, TRUNCATE_EXISTING,
-        FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, NULL
-    );
+        FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, NULL);
     if (capture == INVALID_HANDLE_VALUE) {
         DWORD error = GetLastError();
         DeleteFileW(temp_file);
@@ -94,8 +101,7 @@ static DWORD capture_clipboard(BYTE **output, DWORD *output_size)
 
     HANDLE null = CreateFileW(
         L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
-        &security, OPEN_EXISTING, 0, NULL
-    );
+        &security, OPEN_EXISTING, 0, NULL);
     if (null == INVALID_HANDLE_VALUE) {
         DWORD error = GetLastError();
         CloseHandle(capture);
@@ -105,16 +111,14 @@ static DWORD capture_clipboard(BYTE **output, DWORD *output_size)
     STARTUPINFOW startup = {0};
     PROCESS_INFORMATION process;
     startup.cb = sizeof(startup);
-    startup.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
-    startup.wShowWindow = SW_HIDE;
+    startup.dwFlags = STARTF_USESTDHANDLES;
     startup.hStdInput = null;
     startup.hStdOutput = capture;
     startup.hStdError = capture;
 
-    BOOL started = CreateProcessW(
-        exe, command, NULL, NULL, TRUE, CREATE_NO_WINDOW,
-        NULL, NULL, &startup, &process
-    );
+    BOOL started = CreateProcessW(exe, command, NULL, NULL, TRUE,
+                                  CREATE_NO_WINDOW, NULL, NULL,
+                                  &startup, &process);
     DWORD result = started ? ERROR_SUCCESS : GetLastError();
     CloseHandle(null);
     if (!started) {
@@ -122,9 +126,8 @@ static DWORD capture_clipboard(BYTE **output, DWORD *output_size)
         return result;
     }
 
-    DWORD wait = WaitForSingleObject(
-        process.hProcess, CLIPBOARD_TIMEOUT_MS
-    );
+    DWORD wait = WaitForSingleObject(process.hProcess,
+                                     CLIPBOARD_TIMEOUT_MS);
     if (wait != WAIT_OBJECT_0) {
         result = wait == WAIT_TIMEOUT ? ERROR_TIMEOUT : GetLastError();
         TerminateProcess(process.hProcess, result);
@@ -155,9 +158,7 @@ static DWORD capture_clipboard(BYTE **output, DWORD *output_size)
         if (!*output) {
             result = ERROR_OUTOFMEMORY;
             *output_size = 0;
-        } else if (!transfer(
-                       capture, *output, *output_size, FALSE
-                   )) {
+        } else if (!transfer(capture, *output, *output_size, FALSE)) {
             result = GetLastError();
             HeapFree(GetProcessHeap(), 0, *output);
             *output = NULL;
@@ -179,15 +180,9 @@ static int serve(void)
 
     for (;;) {
         HANDLE pipe = CreateNamedPipeW(
-            PIPE_NAME,
-            PIPE_ACCESS_DUPLEX,
+            PIPE_NAME, PIPE_ACCESS_DUPLEX,
             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-            1,
-            sizeof(DWORD),
-            65536,
-            0,
-            NULL
-        );
+            1, sizeof(DWORD), 65536, 0, NULL);
         if (pipe == INVALID_HANDLE_VALUE)
             return (int)GetLastError();
 
@@ -198,38 +193,21 @@ static int serve(void)
         DWORD payload_size = 0;
         BYTE *payload = NULL;
         BOOL clipboard = FALSE;
-        wchar_t *app = NULL;
-        wchar_t *path = NULL;
+        wchar_t app[MAX_CHARS + 1];
+        wchar_t path[MAX_CHARS + 1];
 
         if (connected &&
             transfer(pipe, &request, sizeof(request), FALSE) &&
             request.app_chars && request.app_chars <= MAX_CHARS &&
-            request.path_chars && request.path_chars <= MAX_CHARS) {
-            app = HeapAlloc(
-                GetProcessHeap(), 0,
-                (request.app_chars + 1) * sizeof(wchar_t)
-            );
-            path = HeapAlloc(
-                GetProcessHeap(), 0,
-                (request.path_chars + 1) * sizeof(wchar_t)
-            );
-
-            if (app && path &&
-                transfer(
-                    pipe, app,
-                    request.app_chars * sizeof(wchar_t), FALSE
-                ) &&
-                transfer(
-                    pipe, path,
-                    request.path_chars * sizeof(wchar_t), FALSE
-                )) {
-                app[request.app_chars] = L'\0';
-                path[request.path_chars] = L'\0';
-                clipboard = wcscmp(app, CLIPBOARD_ARG) == 0;
-                result = clipboard
-                    ? capture_clipboard(&payload, &payload_size)
-                    : launch(app, path);
-            }
+            request.path_chars && request.path_chars <= MAX_CHARS &&
+            transfer(pipe, app, request.app_chars * sizeof(wchar_t), FALSE) &&
+            transfer(pipe, path, request.path_chars * sizeof(wchar_t), FALSE)) {
+            app[request.app_chars] = L'\0';
+            path[request.path_chars] = L'\0';
+            clipboard = wcscmp(app, CLIPBOARD_ARG) == 0;
+            result = clipboard
+                ? capture_clipboard(&payload, &payload_size)
+                : launch(app, path);
         }
 
         transfer(pipe, &result, sizeof(result), TRUE);
@@ -241,57 +219,36 @@ static int serve(void)
         DisconnectNamedPipe(pipe);
         CloseHandle(pipe);
 
-        if (app)
-            HeapFree(GetProcessHeap(), 0, app);
-        if (path)
-            HeapFree(GetProcessHeap(), 0, path);
         if (payload)
             HeapFree(GetProcessHeap(), 0, payload);
     }
 }
 
-static int send_request(
-    const wchar_t *app, const wchar_t *path, BOOL receive_output
-)
+static int send_request(const wchar_t *app, const wchar_t *path,
+                        BOOL receive_output)
 {
-    Request request = {
-        (DWORD)wcslen(app),
-        (DWORD)wcslen(path)
-    };
+    Request request = {(DWORD)wcslen(app), (DWORD)wcslen(path)};
 
     if (!WaitNamedPipeW(PIPE_NAME, CLIPBOARD_TIMEOUT_MS + 2000))
         return (int)GetLastError();
 
-    HANDLE pipe = CreateFileW(
-        PIPE_NAME,
-        GENERIC_READ | GENERIC_WRITE,
-        0,
-        NULL,
-        OPEN_EXISTING,
-        0,
-        NULL
-    );
+    HANDLE pipe = CreateFileW(PIPE_NAME, GENERIC_READ | GENERIC_WRITE,
+                              0, NULL, OPEN_EXISTING, 0, NULL);
     if (pipe == INVALID_HANDLE_VALUE)
         return (int)GetLastError();
 
     DWORD result = ERROR_WRITE_FAULT;
     BOOL ok = transfer(pipe, &request, sizeof(request), TRUE) &&
-              transfer(
-                  pipe, (void *)app,
-                  request.app_chars * sizeof(wchar_t), TRUE
-              ) &&
-              transfer(
-                  pipe, (void *)path,
-                  request.path_chars * sizeof(wchar_t), TRUE
-              ) &&
+              transfer(pipe, (void *)app,
+                       request.app_chars * sizeof(wchar_t), TRUE) &&
+              transfer(pipe, (void *)path,
+                       request.path_chars * sizeof(wchar_t), TRUE) &&
               transfer(pipe, &result, sizeof(result), FALSE);
 
     BYTE *payload = NULL;
     DWORD payload_size = 0;
     if (ok && receive_output) {
-        ok = transfer(
-            pipe, &payload_size, sizeof(payload_size), FALSE
-        );
+        ok = transfer(pipe, &payload_size, sizeof(payload_size), FALSE);
         if (ok &&
             (payload_size > MAX_IMAGE_BYTES ||
              (result == ERROR_SUCCESS && !payload_size))) {
@@ -307,14 +264,11 @@ static int send_request(
         }
         if (ok && payload_size)
             ok = transfer(pipe, payload, payload_size, FALSE);
-        if (ok && payload_size)
-            ok = transfer(
-                GetStdHandle(
-                    result == ERROR_SUCCESS
-                        ? STD_OUTPUT_HANDLE : STD_ERROR_HANDLE
-                ),
-                payload, payload_size, TRUE
-            );
+        if (ok && payload_size) {
+            DWORD stream = result == ERROR_SUCCESS
+                               ? STD_OUTPUT_HANDLE : STD_ERROR_HANDLE;
+            ok = transfer(GetStdHandle(stream), payload, payload_size, TRUE);
+        }
     }
 
     DWORD error = ok ? result : GetLastError();
@@ -324,9 +278,8 @@ static int send_request(
     return (int)error;
 }
 
-int WINAPI wWinMain(
-    HINSTANCE instance, HINSTANCE previous, PWSTR line, int show
-)
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous,
+                    PWSTR line, int show)
 {
     (void)instance;
     (void)previous;
