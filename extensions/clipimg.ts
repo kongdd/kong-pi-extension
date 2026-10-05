@@ -90,7 +90,7 @@ class Thumbnails {
 export default function clipimg(pi: ExtensionAPI) {
   let pending: Shot[] = [];
 
-  pi.registerShortcut("alt+v", {
+  pi.registerShortcut(process.platform === "darwin" ? "ctrl+v" : "alt+v", {
     description: "Attach the clipboard image",
     handler: (ctx) => void handleCommand("", ctx),
   });
@@ -212,7 +212,7 @@ async function captureClipboard(): Promise<Shot> {
 
   mkdirSync(DIR, { recursive: true });
   const path = join(DIR, `${Date.now()}.png`);
-  const command = remote ? "ssh" : "clipimg.exe";
+  const command = remote ? "ssh" : process.platform === "win32" ? "clipimg.exe" : "clipimg";
   const args = remote
     ? [
       "-o", "BatchMode=yes",

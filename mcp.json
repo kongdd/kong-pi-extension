@@ -1,16 +1,8 @@
 {
-  "settings": {
-    "mcpFooterStatus": "off"
-  },
   "mcpServers": {
     "codebase-memory-mcp": {
-      "command": "/home/kong/.local/bin/codebase-memory-mcp",
-      "args": [],
-      "lifecycle": "lazy"
-    },
-    "context-mode": {
-      "command": "context-mode",
-      "lifecycle": "lazy"
+      "command": "~/.local/bin/codebase-memory-mcp",
+      "description": "Local codebase knowledge graph: indexing, structural search, call tracing and architecture analysis."
     }
   }
 }
