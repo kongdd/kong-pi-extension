@@ -1,17 +1,24 @@
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import {
+  getPackageDir,
+  type ExtensionAPI,
+  type ExtensionContext,
+  type Theme,
+} from "@earendil-works/pi-coding-agent";
 import {
   allocateImageId,
-  Box,
+  Container,
   getCapabilities,
-  getImageDimensions,
+  getCellDimensions,
   Image,
-  renderImage,
-  setCapabilityOverrides,
+  resetCapabilitiesCache,
   Text,
+  truncateToWidth,
 } from "@earendil-works/pi-tui";
 
 const execFileAsync = promisify(execFile);
@@ -19,93 +26,114 @@ const MAX_PNG = 18 * 1024 * 1024;
 const WIDGET_ID = "clipimg";
 const THUMB_W = 20;
 const THUMB_H = 6;
-const GAP = 2;
-const SLOT_W = THUMB_W + GAP;
+const GAP = 1;
 const DIR = join(import.meta.dirname, "..", "media", "clipimg");
+const require = createRequire(join(getPackageDir(), "package.json"));
 
 type Shot = { path: string; kb: number };
 type Details = { files?: Shot[] };
 
-/** Herdr 改写了 TERM_PROGRAM，pi 检测不到它支持的 Kitty 图形协议。 */
-function ensureImages(pi: ExtensionAPI) {
-  const terminal = pi.getSettings().terminal;
-  const forced = process.env.PI_IMAGE_PROTOCOL?.toLowerCase();
-  if (terminal?.images === false || terminal?.images === "iterm2") return;
-  if (forced === "none" || forced === "0" || forced === "iterm2") return;
-  if (process.env.TERM_PROGRAM?.toLowerCase() !== "herdr") return;
-  if (getCapabilities().images === "kitty") return;
-  setCapabilityOverrides({
-    images: "kitty",
-    ...(typeof terminal?.trueColor === "boolean" ? { trueColor: terminal.trueColor } : {}),
-    ...(typeof terminal?.hyperlinks === "boolean" ? { hyperlinks: terminal.hyperlinks } : {}),
-  });
+/** 横排合成一张 PNG，避免同一行多张 Kitty 图片无法被 pi 完整追踪。 */
+function thumbnailStrip(files: Shot[], columns: number) {
+  // 复用 pi 已安装的 Photon，不增加依赖。
+  const { PhotonImage, resize, watermark, SamplingFilter } = require("@silvia-odwyer/photon-node");
+  const cell = getCellDimensions();
+  const height = THUMB_H * cell.heightPx;
+  const allocated = [];
+  const thumbs = [];
+  let used = 0;
+  let labels = "";
+  try {
+    for (const [i, file] of files.entries()) {
+      const label = `[${i + 1}] ${file.kb} KB`;
+      const x = used + (i ? GAP : 0);
+      if (x + Math.min(columns, label.length) > columns) break;
+      const data = loadPng(file.path);
+      if (!data) throw new Error(`第 ${i + 1} 张图片无法读取`);
+      const source = PhotonImage.new_from_base64(data);
+      allocated.push(source);
+      const scale = Math.min(
+        (Math.min(THUMB_W, columns) * cell.widthPx) / source.get_width(),
+        height / source.get_height(),
+      );
+      const width = Math.max(1, Math.round(source.get_width() * scale));
+      // 按实际图宽排版，只为标签保留必要空间。
+      const slot = Math.min(columns, Math.max(Math.ceil(width / cell.widthPx), label.length));
+      if (x + slot > columns) break;
+      const image = resize(
+        source, width, Math.max(1, Math.round(source.get_height() * scale)),
+        SamplingFilter.Lanczos3,
+      );
+      allocated.push(image);
+      thumbs.push({ image, x });
+      labels = labels.padEnd(x) + label;
+      used = x + slot;
+    }
+    const width = used * cell.widthPx;
+    const sheet = new PhotonImage(new Uint8Array(width * height * 4), width, height);
+    allocated.push(sheet);
+    for (const { image, x } of thumbs) {
+      watermark(sheet, image, BigInt(x * cell.widthPx), 0n);
+    }
+    return {
+      data: Buffer.from(sheet.get_bytes()).toString("base64"),
+      labels,
+      count: thumbs.length,
+    };
+  } finally {
+    for (const image of allocated) image.free();
+  }
 }
 
-/** WezTerm/Kitty 横排缩略图。 */
+/** 一个图片块占六行，标签独占一行；占位行不能套 Box 填充背景。 */
 class Thumbnails {
-  private cache?: { width: number; lines: string[] };
-  private ids: number[] = [];
+  private imageId = allocateImageId();
+  private cache?: { width: number; protocol: string | null; lines: string[] };
 
-  constructor(
-    private images: Shot[],
-    private theme: Theme,
-    private pi: ExtensionAPI,
-  ) { }
+  constructor(private images: Shot[], private theme: Theme) {}
 
   invalidate() {
     this.cache = undefined;
   }
 
-  private remember(width: number, lines: string[]) {
-    this.cache = { width, lines };
-    return lines;
-  }
-
   render(width: number): string[] {
-    ensureImages(this.pi);
-    if (this.cache?.width === width) return this.cache.lines;
-    if (getCapabilities().images !== "kitty") {
-      return this.remember(width, [this.theme.fg("muted", `[${this.images.length} 张图片待发送]`)]);
+    const protocol = getCapabilities().images;
+    if (this.cache?.width === width && this.cache.protocol === protocol) return this.cache.lines;
+    let lines: string[] = [];
+    let footer = `[${this.images.length} 张图片]`;
+    try {
+      if (protocol) {
+        const columns = Math.max(1, width - 2);
+        const strip = thumbnailStrip(this.images, columns);
+        const image = new Image(
+          strip.data,
+          "image/png",
+          { fallbackColor: (s) => this.theme.fg("muted", s) },
+          { maxWidthCells: columns, maxHeightCells: THUMB_H, imageId: this.imageId },
+        );
+        const hidden = this.images.length - strip.count;
+        const suffix = hidden ? `  +${hidden}` : "";
+        footer = truncateToWidth(strip.labels, Math.max(0, width - suffix.length), "") + suffix;
+        lines = [...image.render(width)];
+      }
+    } catch (error) {
+      footer = `图片无法预览：${error instanceof Error ? error.message : error}`;
     }
-
-    const limit = Math.max(1, Math.floor((width + GAP) / SLOT_W));
-    const previews = this.images.slice(0, limit).flatMap((image, i) => {
-      const data = loadPng(image.path);
-      const dimensions = data && getImageDimensions(data, "image/png");
-      const rendered =
-        data &&
-        dimensions &&
-        renderImage(data, dimensions, {
-          maxWidthCells: THUMB_W,
-          maxHeightCells: THUMB_H,
-          moveCursor: false,
-          imageId: (this.ids[i] ??= allocateImageId()),
-        });
-      return rendered ? [{ ...rendered, kb: image.kb, index: i + 1 }] : [];
-    });
-    if (previews.length === 0) {
-      return this.remember(width, [this.theme.fg("muted", `[${this.images.length} 张图片无法预览]`)]);
-    }
-
-    const top = previews
-      .map((preview, i) => preview.sequence + (i + 1 < previews.length ? " ".repeat(SLOT_W) : ""))
-      .join("");
-    const rows = Math.max(...previews.map((preview) => preview.rows));
-    const hidden = this.images.length - previews.length;
-    const labels = previews
-      .map((preview, i) => `[${preview.index}] ${preview.kb} KB`.padEnd(i + 1 < previews.length ? SLOT_W : 0))
-      .join("");
-    const footer = `${labels}${hidden ? `  +${hidden}` : ""}`.slice(0, width);
-    return this.remember(width, [
-      top,
-      ...Array(rows - 1).fill(""),
-      this.theme.fg("muted", footer),
-    ]);
+    // 终端间距以整行为单位，隔开大小标签与正文或输入框。
+    lines.push(this.theme.fg("muted", truncateToWidth(footer, width)), "");
+    this.cache = { width, protocol, lines };
+    return lines;
   }
 }
 
 /** 管理待发送图片。 */
 export default function clipimg(pi: ExtensionAPI) {
+  // 必须在 TUI 启动前确定协议；渲染时才开启会导致全屏模式不清理图片。
+  // 环境变量仅补充 Herdr 默认值，仍由 terminal.images 设置及显式环境变量覆盖。
+  if (process.env.TERM_PROGRAM?.toLowerCase() === "herdr" && !process.env.PI_IMAGE_PROTOCOL) {
+    process.env.PI_IMAGE_PROTOCOL = "kitty";
+    resetCapabilitiesCache();
+  }
   let pending: Shot[] = [];
 
   pi.registerShortcut(process.platform === "darwin" ? "ctrl+v" : "alt+v", {
@@ -114,28 +142,22 @@ export default function clipimg(pi: ExtensionAPI) {
   });
 
   pi.registerMessageRenderer(WIDGET_ID, (message, { outputPad }, theme) => {
-    ensureImages(pi);
-    const box = new Box(outputPad, 0, (t) => theme.bg("userMessageBg", t));
+    const container = new Container();
     const files = (message.details as Details | undefined)?.files ?? [];
-    for (const [i, file] of files.entries()) {
-      const data = loadPng(file.path);
-      if (!data) continue;
-      box.addChild(
-        new Image(data, "image/png", { fallbackColor: (s) => theme.fg("muted", s) }, {
-          maxWidthCells: THUMB_W,
-          maxHeightCells: THUMB_H,
-        }),
-      );
-      box.addChild(new Text(theme.fg("muted", `[${i + 1}] ${file.kb} KB`), 0, 0));
-    }
+    if (files.length) container.addChild(new Thumbnails(files, theme));
     const text = typeof message.content === "string"
       ? message.content
       : message.content.filter((p) => p.type === "text").map((p) => p.text).join("\n");
-    if (text) box.addChild(new Text(theme.fg("userMessageText", text), 0, 0));
-    return box;
+    if (text) {
+      container.addChild(new Text(
+        theme.fg("userMessageText", text), outputPad, 0,
+        (t) => theme.bg("userMessageBg", t),
+      ));
+    }
+    return container;
   });
 
-  // 会话只保存图片路径；仅在构造模型上下文时读取为图片数据。
+  // 剪贴板图片只保存路径；仅在构造模型上下文时读取为图片数据。
   pi.on("context", (event) => ({
     messages: event.messages.map((m) => {
       if (m.role !== "custom" || m.customType !== WIDGET_ID) return m;
@@ -145,8 +167,10 @@ export default function clipimg(pi: ExtensionAPI) {
         const data = loadPng(f.path);
         return data ? [{ type: "image" as const, data, mimeType: "image/png" }] : [];
       });
-      const text = typeof m.content === "string" ? m.content : "";
-      return { ...m, content: [...(text ? [{ type: "text" as const, text }] : []), ...images] };
+      const content = typeof m.content === "string"
+        ? (m.content ? [{ type: "text" as const, text: m.content }] : [])
+        : m.content;
+      return { ...m, content: [...content, ...images] };
     }),
   }));
 
@@ -154,54 +178,50 @@ export default function clipimg(pi: ExtensionAPI) {
     const images = [...pending];
     ctx.ui.setWidget(
       WIDGET_ID,
-      images.length ? (_tui, theme) => new Thumbnails(images, theme, pi) : undefined,
+      images.length ? (_tui, theme) => new Thumbnails(images, theme) : undefined,
     );
   }
 
   async function handleCommand(args: string, ctx: ExtensionContext) {
     const data = args.trim();
-    if (!data) {
-      const started = performance.now();
-      ctx.ui.notify("saving...", "info");
-      try {
+    try {
+      let message: string;
+      if (!data) {
+        const started = performance.now();
+        ctx.ui.notify("saving...", "info");
         pending.push(await captureClipboard());
-        update(ctx);
-        ctx.ui.notify(`saving used ${((performance.now() - started) / 1000).toFixed(2)}s`, "info");
-      } catch (error) {
-        ctx.ui.notify(`clipimg：${error instanceof Error ? error.message : error}`, "error");
+        message = `saving used ${((performance.now() - started) / 1000).toFixed(2)}s`;
+      } else {
+        if (!/^clear(?:\s|$)/.test(data)) throw new Error("参数无效");
+        const spec = data.slice(5).trim();
+        if (!spec) {
+          message = pending.length ? `已清空 ${pending.length} 张待发送图片` : "没有待发送图片";
+          pending = [];
+        } else {
+          const selected = new Set(spec.split(",").flatMap((part) => {
+            if (!/^\d+(?:\s*-\s*\d+)?$/.test(part.trim())) throw new Error("序号格式无效");
+            const [start, end = start] = part.split("-").map(Number);
+            if (end < start) throw new Error("序号范围无效");
+            // 越界范围只检查端点，避免展开巨大的无效范围。
+            if (start < 1 || end > pending.length) return [start, end];
+            return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+          }));
+          const indices = [...selected].sort((a, b) => a - b);
+          const invalid = indices.filter((i) => i < 1 || i > pending.length);
+          if (invalid.length) throw new Error(`序号无效：${invalid.join(",")}`);
+          pending = pending.filter((_, i) => !selected.has(i + 1));
+          message = `已删除第 ${indices.join(",")} 张图片`;
+        }
       }
-      return;
-    }
-    if (/^clear(?:\s|$)/.test(data)) {
-      const spec = data.slice(5).trim();
-      if (!spec) {
-        const n = pending.length;
-        pending = [];
-        update(ctx);
-        ctx.ui.notify(n ? `已清空 ${n} 张待发送图片` : "没有待发送图片", "info");
-        return;
-      }
-      if (!/^\d+(?:\s*,\s*\d+)*$/.test(spec)) {
-        ctx.ui.notify("clipimg：序号格式无效", "error");
-        return;
-      }
-      const indices = [...new Set(spec.split(",").map(Number))].sort((a, b) => a - b);
-      const invalid = indices.filter((i) => i < 1 || i > pending.length);
-      if (invalid.length) {
-        ctx.ui.notify(`clipimg：序号无效：${invalid.join(",")}`, "error");
-        return;
-      }
-      const selected = new Set(indices);
-      pending = pending.filter((_, i) => !selected.has(i + 1));
       update(ctx);
-      ctx.ui.notify(`已删除第 ${indices.join(",")} 张图片`, "info");
-      return;
+      ctx.ui.notify(message, "info");
+    } catch (error) {
+      ctx.ui.notify(`clipimg：${error instanceof Error ? error.message : error}`, "error");
     }
-    ctx.ui.notify("clipimg：参数无效", "error");
   }
 
   pi.registerCommand("clipimg", {
-    description: "Attach the clipboard image; clear [1,2,...] removes pending images",
+    description: "Attach the clipboard image; clear [1,3-5,...] removes pending images",
     handler: handleCommand,
   });
 
@@ -213,7 +233,9 @@ export default function clipimg(pi: ExtensionAPI) {
     pi.sendMessage(
       {
         customType: WIDGET_ID,
-        content: event.text,
+        content: event.images?.length
+          ? [{ type: "text", text: event.text }, ...event.images]
+          : event.text,
         display: true,
         details: { files },
       },
@@ -221,7 +243,6 @@ export default function clipimg(pi: ExtensionAPI) {
     );
     return { action: "handled" };
   });
-
 }
 
 async function captureClipboard(): Promise<Shot> {
@@ -230,7 +251,7 @@ async function captureClipboard(): Promise<Shot> {
   if (remote && !host) throw new Error("请设置 WIN_SSH_HOST");
 
   mkdirSync(DIR, { recursive: true });
-  const path = join(DIR, `${Date.now()}.png`);
+  const path = join(DIR, `${randomUUID()}.png`);
   const command = remote ? "ssh" : process.platform === "win32" ? "clipimg.exe" : "clipimg";
   const args = remote
     ? [
