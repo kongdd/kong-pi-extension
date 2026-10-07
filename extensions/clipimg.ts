@@ -10,6 +10,7 @@ import {
   getImageDimensions,
   Image,
   renderImage,
+  setCapabilityOverrides,
   Text,
 } from "@earendil-works/pi-tui";
 
@@ -25,6 +26,21 @@ const DIR = join(import.meta.dirname, "..", "media", "clipimg");
 type Shot = { path: string; kb: number };
 type Details = { files?: Shot[] };
 
+/** Herdr 改写了 TERM_PROGRAM，pi 检测不到它支持的 Kitty 图形协议。 */
+function ensureImages(pi: ExtensionAPI) {
+  const terminal = pi.getSettings().terminal;
+  const forced = process.env.PI_IMAGE_PROTOCOL?.toLowerCase();
+  if (terminal?.images === false || terminal?.images === "iterm2") return;
+  if (forced === "none" || forced === "0" || forced === "iterm2") return;
+  if (process.env.TERM_PROGRAM?.toLowerCase() !== "herdr") return;
+  if (getCapabilities().images === "kitty") return;
+  setCapabilityOverrides({
+    images: "kitty",
+    ...(typeof terminal?.trueColor === "boolean" ? { trueColor: terminal.trueColor } : {}),
+    ...(typeof terminal?.hyperlinks === "boolean" ? { hyperlinks: terminal.hyperlinks } : {}),
+  });
+}
+
 /** WezTerm/Kitty 横排缩略图。 */
 class Thumbnails {
   private cache?: { width: number; lines: string[] };
@@ -33,6 +49,7 @@ class Thumbnails {
   constructor(
     private images: Shot[],
     private theme: Theme,
+    private pi: ExtensionAPI,
   ) { }
 
   invalidate() {
@@ -45,6 +62,7 @@ class Thumbnails {
   }
 
   render(width: number): string[] {
+    ensureImages(this.pi);
     if (this.cache?.width === width) return this.cache.lines;
     if (getCapabilities().images !== "kitty") {
       return this.remember(width, [this.theme.fg("muted", `[${this.images.length} 张图片待发送]`)]);
@@ -96,6 +114,7 @@ export default function clipimg(pi: ExtensionAPI) {
   });
 
   pi.registerMessageRenderer(WIDGET_ID, (message, { outputPad }, theme) => {
+    ensureImages(pi);
     const box = new Box(outputPad, 0, (t) => theme.bg("userMessageBg", t));
     const files = (message.details as Details | undefined)?.files ?? [];
     for (const [i, file] of files.entries()) {
@@ -135,7 +154,7 @@ export default function clipimg(pi: ExtensionAPI) {
     const images = [...pending];
     ctx.ui.setWidget(
       WIDGET_ID,
-      images.length ? (_tui, theme) => new Thumbnails(images, theme) : undefined,
+      images.length ? (_tui, theme) => new Thumbnails(images, theme, pi) : undefined,
     );
   }
 
