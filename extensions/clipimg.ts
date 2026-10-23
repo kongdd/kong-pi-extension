@@ -246,9 +246,9 @@ export default function clipimg(pi: ExtensionAPI) {
 }
 
 async function captureClipboard(): Promise<Shot> {
-  const remote = Boolean(process.env.SSH_CONNECTION);
-  const host = process.env.WIN_SSH_HOST ?? "";
-  if (remote && !host) throw new Error("请设置 WIN_SSH_HOST");
+  // 仅显式配置主机时读取 Windows 剪贴板，避免继承 SSH_CONNECTION 导致误判。
+  const host = process.env.WIN_SSH_HOST?.trim() ?? "";
+  const remote = Boolean(host);
 
   mkdirSync(DIR, { recursive: true });
   const path = join(DIR, `${randomUUID()}.png`);

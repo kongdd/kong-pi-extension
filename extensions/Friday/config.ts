@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
-export type FridayConfig = { saveAudio: boolean };
+export type FridayConfig = { saveAudio: boolean; mode?: "local" | "remote" };
 
 const piConfigDir = () => process.env.PI_CONFIG_DIR ?? join(homedir(), ".pi");
 const agentDir = () => join(piConfigDir(), "agent");
@@ -12,7 +12,10 @@ const configPath = () => join(piConfigDir(), "Friday.json");
 export function loadFridayConfig(): FridayConfig {
   try {
     const config = JSON.parse(readFileSync(configPath(), "utf8")) as Partial<FridayConfig>;
-    return { saveAudio: config.saveAudio === true };
+    return {
+      saveAudio: config.saveAudio === true,
+      mode: config.mode === "local" || config.mode === "remote" ? config.mode : undefined,
+    };
   } catch {
     return { saveAudio: false };
   }
@@ -21,7 +24,7 @@ export function loadFridayConfig(): FridayConfig {
 export async function saveFridayConfig(config: FridayConfig): Promise<void> {
   const path = configPath();
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  await writeFile(path, `${JSON.stringify({ ...loadFridayConfig(), ...config }, null, 2)}\n`, "utf8");
 }
 
 const safeName = (text: string) => text.replace(/[^\p{L}\p{N}._-]+/gu, "_") || "unknown";

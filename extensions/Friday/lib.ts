@@ -40,7 +40,11 @@ export function rateToEdgeTts(rate: number): string {
   return `${p >= 0 ? "+" : ""}${p}%`;
 }
 
-export function isRemoteEnv(): boolean {
+export function isRemoteEnv(mode?: "local" | "remote"): boolean {
+  // 持久化配置优先，避免继承的 SSH 环境变量触发远程播放。
+  if (mode) return mode === "remote";
+  // 环境变量仍可在未配置模式时显式指定本地播放。
+  if (process.env.FRIDAY_REMOTE === "0") return false;
   return Boolean(
     process.env.FRIDAY_REMOTE === "1"
     || process.env.SSH_CONNECTION

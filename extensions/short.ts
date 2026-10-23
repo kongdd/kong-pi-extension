@@ -3,7 +3,7 @@
  *
  * 用法：
  *   /short on|off     开关系统提示注入（默认 on）
- *   /short <问题>     发送带短答约束的 user message
+ *   /short <问题>     发送带短答约束的 user message，忙碌时加入 steer 队列
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -36,7 +36,9 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify("用法：/short on|off | /short <问题>", "warning");
         return;
       }
-      await pi.sendUserMessage(`${text}\n\n${REMINDER}`);
+      await pi.sendUserMessage(`${text}\n\n${REMINDER}`, {
+        deliverAs: ctx.isIdle() ? undefined : "steer",
+      });
     },
   });
 }

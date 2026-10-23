@@ -11,9 +11,9 @@ import { createSpeechEngine } from "./speech-engine";
 import { extractAssistantText, summarizeForSpeech } from "./text";
 
 export default function friday(pi: ExtensionAPI): void {
-  const isRemote = isRemoteEnv();
-  const enableRemoteSse = process.env.FRIDAY_ENABLE_SSE === "1";
   const config = loadFridayConfig();
+  const isRemote = isRemoteEnv(config.mode);
+  const enableRemoteSse = process.env.FRIDAY_ENABLE_SSE === "1";
   const engine = createSpeechEngine(pi, {
     isRemote,
     enableRemoteSse,

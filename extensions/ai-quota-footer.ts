@@ -12,6 +12,7 @@ const PROVIDERS: Record<string, string> = {
   "minimax-cn": "minimax",
   deepseek: "deepseek",
   "deepseek-api": "deepseek",
+  "github-copilot": "github-copilot",
 };
 
 // Read the compact report, retaining ai-quota's exact ANSI colors and rounding.
@@ -30,7 +31,7 @@ function quotaCell(report: string, provider: string): string | undefined {
         ? name === "openai·apps"
         : provider === "openai-codex"
           ? /^codex(?:·|$)/.test(name)
-          : name.startsWith(provider);
+          : name.startsWith(provider === "github-copilot" ? "gh-copilot" : provider);
     } else if (selected && provider === "deepseek" && /^\s+bal\s/.test(plain)) {
       return line.replace(/^\s+bal\s+/, "").trim() || undefined;
     } else if (selected && provider !== "deepseek" && /^\s+(?:5h|wk|mo)\s/.test(plain)) {
