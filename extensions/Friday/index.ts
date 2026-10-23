@@ -1,12 +1,12 @@
 /**
- * Friday — pi 语音助手（/friday on|off|zh|en|speed|test|config）
+ * Friday — pi 语音助手（/friday on|off [global|local]、zh|en|speed|test|config）
  * 本地：edge-tts + mpv；Remote：POST 17322 或 SSE 17321 降级。
  */
 
 import { dirname } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { loadFridayConfig, savedAudioPath, saveFridayConfig } from "./config";
-import { FRIDAY_CMDS, STATUS_KEY, VOICES, isRemoteEnv, rateToEdgeTts, remoteOnHelp } from "./lib";
+import { loadFridayConfig, savedAudioPath, saveFridayConfig, type FridayScope } from "./config";
+import { FRIDAY_CMDS, STATUS_KEY, VOICES, isRemoteEnv, rateToEdgeTts } from "./lib";
 import { createSpeechEngine } from "./speech-engine";
 import { extractAssistantText, summarizeForSpeech } from "./text";
 
@@ -38,7 +38,7 @@ export default function friday(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("friday", {
-    description: "Friday 语音：on|off|zh|en|speed <n>|test|config --save-audio=yes/no",
+    description: "Friday 语音：on|off [global|local]|zh|en|speed <n>|test|config --save-audio=yes/no",
     getArgumentCompletions(prefix) {
       const v = prefix.trim().toLowerCase();
       return FRIDAY_CMDS.filter((c) => c.startsWith(v)).map((c) => ({ value: c, label: c }));
@@ -67,16 +67,33 @@ export default function friday(pi: ExtensionAPI): void {
         ctx.ui.notify("格式：/friday config --save-audio=yes/no", "error");
         return;
       }
-      if (cmd === "on") {
-        await engine.turnOn(ctx);
+      const toggle = cmd.match(/^(on|off)(?:\s+(global|local))?$/);
+      if (toggle) {
+        const scope = toggle[2] as FridayScope | undefined;
+        let enabled = toggle[1] === "on";
+        if (scope) {
+          try {
+            await saveFridayConfig({ enabled }, scope, ctx.cwd);
+          } catch (error) {
+            ctx.ui.notify(`Friday 配置保存失败：${error instanceof Error ? error.message : String(error)}`, "error");
+            return;
+          }
+          ctx.ui.notify(`Friday 已保存${scope === "global" ? "全局" : "项目"}开关：${enabled ? "on" : "off"}（项目配置优先）。`, "info");
+          enabled = loadFridayConfig(ctx.cwd).enabled ?? isRemote;
+        }
+        if (enabled) {
+          await engine.turnOn(ctx);
+        } else {
+          engine.enabled = false;
+          engine.stopLocalSpeech();
+          engine.emitStop(ctx);
+          engine.renderStatus(ctx);
+          ctx.ui.notify("Friday 已关闭。", "info");
+        }
         return;
       }
-      if (cmd === "off") {
-        engine.enabled = false;
-        engine.stopLocalSpeech();
-        engine.emitStop(ctx);
-        engine.renderStatus(ctx);
-        ctx.ui.notify("Friday 已关闭。", "info");
+      if (/^(on|off)\b/.test(cmd)) {
+        ctx.ui.notify("格式：/friday on|off [global|local]", "error");
         return;
       }
       if (cmd === "zh" || cmd === "en") {
@@ -132,15 +149,10 @@ export default function friday(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    const enabled = loadFridayConfig(ctx.cwd).enabled ?? isRemote;
+    engine.enabled = false;
     engine.renderStatus(ctx);
-    if (!enableRemoteSse || !engine.enabled || !isRemote || engine.hasRemoteServer) return;
-    const url = await engine.ensureRemoteReady(ctx);
-    if (!url) {
-      engine.enabled = false;
-      engine.renderStatus(ctx);
-      return;
-    }
-    ctx.ui.notify(remoteOnHelp(url, true), "info");
+    if (enabled) await engine.turnOn(ctx);
   });
 
   pi.on("session_shutdown", (_event, ctx) => {

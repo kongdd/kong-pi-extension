@@ -2,6 +2,6 @@
   "app.clipboard.pasteImage": [],
   "tui.editor.cursorLineStart": ["home", "ctrl+a", "super+left"],
   "tui.editor.cursorLineEnd": ["end", "ctrl+e", "super+right"],
-  "tui.altScreen.top": "ctrl+home",
-  "tui.altScreen.bottom": "ctrl+end"
+  "tui.altScreen.top": ["ctrl+home", "super+up"],
+  "tui.altScreen.bottom": ["ctrl+end", "super+down"]
 }

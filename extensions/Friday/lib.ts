@@ -29,7 +29,8 @@ export const REMOTE_SPEECH_HOST = "127.0.0.1";
 export const REMOTE_SPEECH_PORT = 17321;
 export const DEFAULT_LOCAL_RECEIVER_URL = "http://127.0.0.1:17322/speak";
 export const FRIDAY_CMDS = [
-  "on", "off", "zh", "en", "speed", "test",
+  "on", "on global", "on local", "off", "off global", "off local",
+  "zh", "en", "speed", "test",
   "config --save-audio=yes", "config --save-audio=no",
 ] as const;
 
