@@ -1,5 +1,6 @@
 {
   "app.clipboard.pasteImage": [],
+  "app.message.followUp": ["alt+enter", "ctrl+enter"],
   "tui.editor.cursorLineStart": ["home", "ctrl+a", "super+left"],
   "tui.editor.cursorLineEnd": ["end", "ctrl+e", "super+right"],
   "tui.altScreen.top": ["ctrl+home", "super+up"],
