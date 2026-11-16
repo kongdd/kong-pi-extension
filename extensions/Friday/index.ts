@@ -31,7 +31,7 @@ export default function friday(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
-    if (!engine.enabled || !lastAssistantText) return;
+    if (ctx.mode === "json" || ctx.mode === "print" || !engine.enabled || !lastAssistantText) return;
     const summary = summarizeForSpeech(lastAssistantText);
     if (!summary) return;
     await engine.deliverSpeech(summary, ctx);
@@ -149,6 +149,7 @@ export default function friday(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    if (ctx.mode === "json" || ctx.mode === "print") return;
     const enabled = loadFridayConfig(ctx.cwd).enabled ?? isRemote;
     engine.enabled = false;
     engine.renderStatus(ctx);

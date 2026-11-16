@@ -29,7 +29,13 @@
 
 - **`pi-vscode-context.ts`** — 注册 `vscode_context` 工具、`/vscode` 与 `/vscode-auto` 命令。通过 loopback socket 与「Pi Agent Context」VSCode 插件通信，自动注入当前文件与选区上下文，支持 `Cmd+Alt+K` 提及。
 
-### 1.4 工具链
+### 1.4 Friday 语音
+
+`/friday on|off` 仅切换当前会话，追加 `global` 保存到 `~/.pi/Friday.json`，追加 `local` 保存到当前项目 `.pi/Friday.json`；项目开关优先，重启后仍生效。`/friday test` 测试。默认根据 SSH 环境变量判断播放位置；若本地终端继承了 SSH 变量，可在 `~/.pi/Friday.json` 设置 `"mode": "local"`，然后 `/reload`。`"remote"` 强制远程模式，删除 `mode` 恢复自动判断。`/friday config --save-audio=yes/no` 不会覆盖此设置。
+
+### 1.5 工具链
+
+- **`skill-manager/`** — `/skills`、`/exts` 管理技能和扩展，追加 `local` 设置项目覆盖；项目优先于全局，扩展开关重载后生效。详见 [使用说明](extensions/skill-manager/README.md)。
 
 - **`quota.ts`** — 注册 `/quota` 命令，调用系统 `ai-quota` 查询各 AI 服务额度。
 - **`rtk.ts`** — RTK（Rust Token Killer）代理层，自动将 bash 命令重写为 `rtk` 等价形式以节省 token。改写逻辑全部位于 Rust 注册表 `src/discover/registry.rs`，本扩展只是薄壳。

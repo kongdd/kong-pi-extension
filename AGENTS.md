@@ -1,34 +1,15 @@
-- 遵循：**linux极简主义原则**，一次做好一件事，追求简洁、优雅、易懂的代码；但需要注意，不要违反代码的排版规范，以及代码的易读性
-- 文件组织：代码、数据、图件分别存放不同的文件夹
-- 精通R语言：tidyverse, data.table, ggplot2等
-- 精通Julia：精通高性能科学计算
+- 遵循 Linux 极简主义，函数式编程思维，一次做好一件事
+- 不要交付低质量的代码，我会逐行审阅，要符合一个老程序员的审美
+- 代码要简洁、易懂，不得破坏代码的易读性；不得违反代码排版规范
+- R语言tidyverse专家
+- 不要删除有意义的注释
+
 - 报告写作：遵循学术论文规范，细节充分；逻辑严谨，语言凝练。遵循总分的结构，第一句话先概括；然后再分点阐述。
-- 语言表达：文字应符合中文表述习惯、书面表达，不要啰嗦（语言凝练），不要生硬的英文翻译（符合中文表达习惯）
-- 不要删除有意义的注释，代码（未来复用）或解释（帮助理解）；一些凌乱的注释，可以帮忙整理
+- 语言表达：文字应符合中文表述习惯、书面表达，语言凝练，不要生硬的英文翻译
+- 生成、截图的图片，放images文件夹；markdown写相对路径：`![image_title](images/img.png)`
 
-## 软件环境
+## Environment
 
-```bash
-alias Rscript=/opt/miniforge3/envs/r4.5/bin/Rscript
-alias julia=/home/linuxbrew/.linuxbrew/bin/julia
-```
-
-## 电脑环境
-- 90G内存，32线程，可并行、多线程
-
-## 跨仓库检索
-
-- 禁止对/mnt/z，/mnt/z/GitHub执行全盘检索。先用 **autojump**：`zsh -lic 'j ModernHydro'`、`j ModelParams`等定位仓库根目录
-
-## codebase-memory-mcp 使用经验
-
-使用codebase mcp进行大型repo的代码检索
-- `index_repository`参数名为 `repo_path`
-- 默认`moderate`模式，自动过滤docs/examples/target/node_modules 等，且避开二进制文件
-
-## 图片
-生成、截图的图片，放images文件夹；markdown写相对路径：`![image_title](images/img.png)`
-
-## 后台进程（pi-processes）
-提交长运行命令（Julia 模型训练、build、dev server、`tail -f` 等）时，使用 `process` 工具而非 `bash`，避免阻塞主对话：
-启动后继续其他任务，完成/失败时自动通知；
+- julia=/opt/homebrew/bin/julia
+- R=/opt/homebrew/bin/arf
+- 18线程，可并行、多线程
