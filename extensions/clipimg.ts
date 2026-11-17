@@ -23,11 +23,11 @@ import {
 
 const execFileAsync = promisify(execFile);
 const MAX_PNG = 18 * 1024 * 1024;
-const WIDGET_ID = "clipimg";
+const WIDGET_ID = "clipboard_image";
 const THUMB_W = 20;
 const THUMB_H = 6;
 const GAP = 1;
-const DIR = join(import.meta.dirname, "..", "media", "clipimg");
+const DIR = join(import.meta.dirname, "..", "media", "clipboard_image");
 const require = createRequire(join(getPackageDir(), "package.json"));
 
 type Shot = { path: string; kb: number };
@@ -127,7 +127,7 @@ class Thumbnails {
 }
 
 /** 管理待发送图片。 */
-export default function clipimg(pi: ExtensionAPI) {
+export default function clipboard_image(pi: ExtensionAPI) {
   // 必须在 TUI 启动前确定协议；渲染时才开启会导致全屏模式不清理图片。
   // 环境变量仅补充 Herdr 默认值，仍由 terminal.images 设置及显式环境变量覆盖。
   if (process.env.TERM_PROGRAM?.toLowerCase() === "herdr" && !process.env.PI_IMAGE_PROTOCOL) {
@@ -216,11 +216,11 @@ export default function clipimg(pi: ExtensionAPI) {
       update(ctx);
       ctx.ui.notify(message, "info");
     } catch (error) {
-      ctx.ui.notify(`clipimg：${error instanceof Error ? error.message : error}`, "error");
+      ctx.ui.notify(`clipboard_image：${error instanceof Error ? error.message : error}`, "error");
     }
   }
 
-  pi.registerCommand("clipimg", {
+  pi.registerCommand("clipboard_image", {
     description: "Attach the clipboard image; clear [1,3-5,...] removes pending images",
     handler: handleCommand,
   });
@@ -252,7 +252,7 @@ async function captureClipboard(): Promise<Shot> {
 
   mkdirSync(DIR, { recursive: true });
   const path = join(DIR, `${randomUUID()}.png`);
-  const command = remote ? "ssh" : process.platform === "win32" ? "clipimg.exe" : "clipimg";
+  const command = remote ? "ssh" : process.platform === "win32" ? "clipboard_image.exe" : "clipboard_image";
   const args = remote
     ? [
       "-o", "BatchMode=yes",
