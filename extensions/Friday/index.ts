@@ -1,6 +1,6 @@
 /**
  * Friday — pi 语音助手（/friday on|off [global|local]、zh|en|speed|test|config）
- * 本地：edge-tts + mpv；Remote：POST 17322 或 SSE 17321 降级。
+ * 本地：edge-tts-rust + 系统对应的播放器；Remote：POST 17322 或 SSE 17321 降级。
  */
 
 import { dirname } from "node:path";
@@ -140,7 +140,7 @@ export default function friday(pi: ExtensionAPI): void {
       }
 
       const mode = isRemote ? "SSH/远程"
-        : ctx.mode === "rpc" ? "RPC 浏览器" : "本地 edge-tts";
+        : ctx.mode === "rpc" ? "RPC 浏览器" : "本地 edge-tts-rust";
       ctx.ui.notify(
         `Friday\n  状态：${engine.enabled ? "开" : "关"}\n  音色：${VOICES[engine.voiceMode]}\n  语速：${engine.speechRate}×\n  保存音频：${engine.saveAudio ? "是" : "否"}\n  模式：${mode}${enableRemoteSse ? `\n  SSE 连接：${engine.remoteClientCount}` : ""}`,
         "info",

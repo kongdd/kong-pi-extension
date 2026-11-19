@@ -20,65 +20,81 @@ import { archiveMp3, findPlayer, mp3Base64, playMp3File, synthMp3 } from "./tts"
 
 const SSE_PAGE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "remote-speech-page.html"), "utf8");
 
-async function saveAudioCopy(path: string, destination: string | undefined, ctx: StatusCtx): Promise<void> {
+async function saveAudioCopy(
+  path: string,
+  destination: string | undefined,
+  ctx: StatusCtx,
+  isCurrent?: () => boolean,
+): Promise<void> {
   if (!destination) return;
   try { await archiveMp3(path, destination); }
   catch (error) {
+    if (isCurrent && !isCurrent()) return;
     ctx.ui.notify(`Friday 音频保存失败：${error instanceof Error ? error.message : String(error)}`, "warning");
   }
 }
 
-// —— 本地 mpv 队列 ——
+// —— 本地播放队列 ——
+export type LocalSpeechPhase = "idle" | "synthesizing" | "speaking";
+
 export function createLocalChannel(deps: {
   pi: ExtensionAPI;
   isEnabled: () => boolean;
   voice: () => VoiceMode;
   rate: () => number;
-  onSpeaking: (v: boolean) => void;
-  renderStatus: (ctx: StatusCtx) => void;
+  onPhase: (phase: LocalSpeechPhase, ctx?: StatusCtx) => void;
 }) {
   let player: Player | undefined;
   let current: import("node:child_process").ChildProcess | undefined;
   let queue: Array<{ text: string; saveTo?: string }> = [];
-  let draining = false;
-  let cancelGen = 0;
+  let drain: symbol | undefined;
 
   const stop = () => {
-    cancelGen++;
+    drain = undefined;
     queue = [];
     stopProc(current);
     current = undefined;
-    deps.onSpeaking(false);
+    deps.onPhase("idle");
   };
 
   const enqueue = (text: string, ctx: StatusCtx, saveTo?: string) => {
     queue.push({ text, saveTo });
-    if (draining) return;
-    draining = true;
-    void (async () => {
-      while (deps.isEnabled() && queue.length) {
-        const next = queue.shift();
-        const g = cancelGen;
-        if (!next || !player) continue;
-        deps.onSpeaking(true);
-        deps.renderStatus(ctx);
-        const path = await synthMp3(deps.pi, next.text, deps.voice(), deps.rate(), "local");
-        if (!path) continue;
-        await saveAudioCopy(path, next.saveTo, ctx);
-        if (deps.isEnabled() && g === cancelGen) {
-          await playMp3File(player, path, (p) => { current = p; });
-        } else {
-          await rm(path, { force: true }).catch(() => {});
+    if (drain) return;
+    const token = drain = Symbol();
+    // Shutdown and /friday off invalidate this worker before it can resume.
+    const isCurrent = () => drain === token;
+
+    return (async () => {
+      try {
+        while (isCurrent() && deps.isEnabled() && queue.length) {
+          const next = queue.shift();
+          if (!next || !player) continue;
+          deps.onPhase("synthesizing", ctx);
+          let path = await synthMp3(deps.pi, next.text, deps.voice(), deps.rate(), "local");
+          if (!path) continue;
+          try {
+            if (!isCurrent()) continue;
+            await saveAudioCopy(path, next.saveTo, ctx, isCurrent);
+            if (isCurrent() && deps.isEnabled()) {
+              deps.onPhase("speaking", ctx);
+              await playMp3File(player, path, (p) => { current = p; });
+              path = undefined;
+            }
+          } finally {
+            if (path) await rm(path, { force: true }).catch(() => {});
+            if (isCurrent()) current = undefined;
+          }
         }
-        current = undefined;
+      } finally {
+        if (isCurrent()) {
+          drain = undefined;
+          deps.onPhase("idle", ctx);
+        }
       }
-      deps.onSpeaking(false);
-      draining = false;
-      deps.renderStatus(ctx);
-    })();
+    })().catch((error) => { console.error("Friday 本地播放失败：", error); });
   };
 
-  const preparePlayer = async () => { player = await findPlayer(deps.pi); return player; };
+  const preparePlayer = async () => { player = await findPlayer(); return player; };
 
   return { stop, enqueue, preparePlayer, get player() { return player; } };
 }

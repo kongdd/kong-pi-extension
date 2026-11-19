@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { createLocalChannel, createRemoteChannel, createRpcChannel } from "./channels";
+import { createLocalChannel, createRemoteChannel, createRpcChannel, type LocalSpeechPhase } from "./channels";
 import { projectName, savedAudioPath } from "./config";
 import { STATUS_KEY, langFor, remoteOnHelp, type StatusCtx, type VoiceMode } from "./lib";
 import { hasEdgeTts, synthSavedMp3 } from "./tts";
@@ -20,7 +20,7 @@ export function createSpeechEngine(
   let voiceMode: VoiceMode = "zh";
   let speechRate = 1.0;
   let saveAudio = opts.saveAudio;
-  let speaking = false;
+  let phase: LocalSpeechPhase = "idle";
   let warnedDisconnected = false;
 
   const remote = createRemoteChannel({
@@ -36,7 +36,10 @@ export function createSpeechEngine(
     if (!ctx.hasUI) return;
     if (!enabled) { ctx.ui.setStatus(STATUS_KEY, "○ Friday off"); return; }
     const speed = speechRate === 1 ? "" : ` ${speechRate}×`;
-    ctx.ui.setStatus(STATUS_KEY, speaking ? `◉ Friday speaking${speed}` : `● Friday ${voiceMode}${speed}`);
+    const status = phase === "idle" ? `● Friday ${voiceMode}`
+      : phase === "synthesizing" ? "◉ Friday to audio"
+      : "◉ Friday speaking...";
+    ctx.ui.setStatus(STATUS_KEY, `${status}${speed}`);
   };
 
   const local = createLocalChannel({
@@ -44,8 +47,10 @@ export function createSpeechEngine(
     isEnabled: () => enabled,
     voice: () => voiceMode,
     rate: () => speechRate,
-    onSpeaking: (v) => { speaking = v; },
-    renderStatus,
+    onPhase: (next, ctx) => {
+      phase = next;
+      if (ctx) renderStatus(ctx);
+    },
   });
 
   const makeSpeak = (text: string) => ({ action: "speak" as const, text, lang: langFor(voiceMode), rate: speechRate });
@@ -74,7 +79,7 @@ export function createSpeechEngine(
       if (saveTo) {
         try {
           if (!await synthSavedMp3(pi, spokenText, voiceMode, speechRate, saveTo)) {
-            ctx.ui.notify("Friday 音频保存失败：edge-tts 合成失败。", "warning");
+            ctx.ui.notify("Friday 音频保存失败：edge-tts-rust 合成失败。", "warning");
           }
         } catch (error) {
           ctx.ui.notify(`Friday 音频保存失败：${error instanceof Error ? error.message : String(error)}`, "warning");
@@ -94,7 +99,7 @@ export function createSpeechEngine(
 
   const ensureRemoteReady = async (ctx: StatusCtx) => {
     if (!await hasEdgeTts(pi)) {
-      ctx.ui.notify("Friday 无法开启：未找到 uvx edge-tts。", "error");
+      ctx.ui.notify("Friday 无法开启：未找到 edge-tts-rust。", "error");
       return undefined;
     }
     try { return await remote.start(); }
@@ -116,7 +121,7 @@ export function createSpeechEngine(
         return;
       }
       if (!await hasEdgeTts(pi)) {
-        ctx.ui.notify("Friday 无法开启：未找到 uvx edge-tts。", "error");
+        ctx.ui.notify("Friday 无法开启：未找到 edge-tts-rust。", "error");
         return;
       }
       enabled = true;
@@ -127,13 +132,16 @@ export function createSpeechEngine(
     if (ctx.mode !== "rpc") {
       const [ok, p] = await Promise.all([hasEdgeTts(pi), local.preparePlayer()]);
       if (!ok || !p) {
-        ctx.ui.notify(`Friday 无法开启：${[!ok && "未找到 uvx edge-tts", !p && "未找到 mpv、ffplay 或 mplayer"].filter(Boolean).join("；")}`, "error");
+        const missingPlayer = process.platform === "win32"
+          ? "未找到播放器，请将 audio-play.exe 所在目录加入 PATH"
+          : "未找到可用的音频播放器";
+        ctx.ui.notify(`Friday 无法开启：${[!ok && "未找到 edge-tts-rust", !p && missingPlayer].filter(Boolean).join("；")}`, "error");
         return;
       }
     }
     enabled = true;
     renderStatus(ctx);
-    ctx.ui.notify(ctx.mode === "rpc" ? "Friday 已开启：RPC 浏览器语音。" : `Friday 已开启：本地播放器 ${local.player}。`, "info");
+    ctx.ui.notify(ctx.mode === "rpc" ? "Friday 已开启：RPC 浏览器语音。" : `Friday 已开启：本地播放器 ${local.player?.name}。`, "info");
   };
 
   return {

@@ -1,7 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 
 export type VoiceMode = "zh" | "en";
-export type Player = "mpv" | "ffplay" | "mplayer";
+export type PlayerName = "afplay" | "audio-play" | (typeof PLAYERS)[number];
+export type Player = { name: PlayerName; command: string };
 export type SpeakCommand = {
   action: "speak" | "stop";
   text?: string;
@@ -24,7 +25,7 @@ export const VOICES: Record<VoiceMode, string> = {
   zh: "zh-CN-XiaoxiaoNeural",
   en: "en-US-AriaNeural",
 };
-export const PLAYERS = ["mpv", "ffplay", "mplayer"] as const;
+export const PLAYERS = ["ffplay", "mplayer"] as const;
 export const REMOTE_SPEECH_HOST = "127.0.0.1";
 export const REMOTE_SPEECH_PORT = 17321;
 export const DEFAULT_LOCAL_RECEIVER_URL = "http://127.0.0.1:17322/speak";
@@ -73,10 +74,10 @@ export function stopProc(proc: ChildProcess | undefined): void {
   if (proc && !proc.killed) proc.kill("SIGTERM");
 }
 
-export function playerArgs(program: Player, file: string): string[] {
+export function playerArgs(program: PlayerName, file: string): string[] {
   if (program === "ffplay") return ["-nodisp", "-autoexit", "-loglevel", "error", file];
-  if (program === "mpv") return ["--no-video", "--really-quiet", file];
-  return ["-really-quiet", file];
+  if (program === "mplayer") return ["-really-quiet", file];
+  return [file];
 }
 
-export const spawnQuiet = (cmd: string, args: string[]) => spawn(cmd, args, { stdio: "ignore" });
+export const spawnQuiet = (cmd: string, args: string[]) => spawn(cmd, args, { stdio: "ignore", windowsHide: true });

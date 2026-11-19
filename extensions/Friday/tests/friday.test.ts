@@ -8,7 +8,7 @@ import friday from "../index";
 
 let root: string;
 let cwd: string;
-const envKeys = ["PI_CONFIG_DIR", "FRIDAY_REMOTE", "FRIDAY_ENABLE_SSE"] as const;
+const envKeys = ["PI_CONFIG_DIR", "FRIDAY_REMOTE", "FRIDAY_ENABLE_SSE", "PATH"] as const;
 let previousEnv: Array<string | undefined>;
 
 beforeEach(() => {
@@ -19,6 +19,10 @@ beforeEach(() => {
   process.env.PI_CONFIG_DIR = join(root, "config");
   process.env.FRIDAY_REMOTE = "0";
   delete process.env.FRIDAY_ENABLE_SSE;
+  const bin = join(root, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, process.platform === "win32" ? "audio-play.exe" : "audio-play"), "", { mode: 0o755 });
+  process.env.PATH = bin;
 });
 
 afterEach(() => {
@@ -112,7 +116,7 @@ test.each(["global", "local"] as const)("on/off %s 持久化并在新会话恢�
   const reloaded = runtime();
   await reloaded.start();
   expect(reloaded.status).toBe("● Friday zh");
-  expect(reloaded.executions).toEqual(["uvx", "sh"]);
+  expect(reloaded.executions).toEqual(["edge-tts-rust"]);
   await reloaded.run(`off ${scope}`);
   expect(reloaded.status).toBe("○ Friday off");
   const next = runtime();
