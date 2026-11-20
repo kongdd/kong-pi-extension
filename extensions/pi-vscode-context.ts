@@ -1,4 +1,4 @@
-// Pi companion extension for the "Pi Agent Context" VSCode extension.
+// Pi companion extension for "VSCode Pi Agent Bridge".
 //
 // Install: copy to ~/.pi/agent/extensions/ (global) or .pi/extensions/ (project).
 //
